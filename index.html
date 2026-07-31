@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Coin and Company</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <section class="entry-screen" id="entryScreen">
+    <div class="splash-art" aria-hidden="true">
+      <div class="splash-card splash-card-contract">
+        <span>Contract</span>
+        <strong>Repair a Trade Bridge</strong>
+        <i></i><i></i><i></i>
+      </div>
+      <div class="splash-card splash-card-facility">
+        <span>Facility</span>
+        <strong>Market Hall</strong>
+        <div class="splash-slots"><b></b><b></b></div>
+      </div>
+      <div class="splash-meeple splash-meeple-a">KC</div>
+      <div class="splash-meeple splash-meeple-b">OS</div>
+      <div class="splash-meeple splash-meeple-c">BL</div>
+      <div class="splash-line splash-line-a"></div>
+      <div class="splash-line splash-line-b"></div>
+    </div>
+
+    <div class="entry-copy">
+      <p class="modal-eyebrow">Worker Placement / Trait Engines</p>
+      <h1>Coin and Company</h1>
+      <p class="entry-dek">Build a retinue, read the world, and let your mercenaries turn small advantages into season-defining chains.</p>
+      <label class="guild-name-field" for="guildNameInput">
+        <span>Guild name</span>
+        <input id="guildNameInput" type="text" maxlength="28" value="Amber Company" autocomplete="off">
+      </label>
+      <div class="entry-actions" aria-label="Main menu">
+        <button id="singlePlayerBtn" class="primary" type="button">Single Player</button>
+        <button id="loadGameBtn" type="button">Load Game</button>
+        <button id="multiplayerBtn" type="button">Multiplayer</button>
+        <button id="settingsBtn" type="button">Settings</button>
+        <button id="glossaryBtn" type="button">Glossary</button>
+      </div>
+      <p id="entryNote" class="entry-note">Single player contest against three AI guilds.</p>
+    </div>
+
+    <div class="entry-panel closed" id="settingsPanel">
+      <h2>Settings</h2>
+      <div class="settings-list">
+        <label>
+          <span>AI turn pace</span>
+          <select id="aiPaceSelect">
+            <option value="250">Fast</option>
+            <option value="550" selected>Normal</option>
+            <option value="900">Readable</option>
+          </select>
+        </label>
+      </div>
+      <p class="entry-note">More settings can live here as the prototype hardens.</p>
+    </div>
+
+    <div class="entry-panel closed" id="glossaryPanel">
+      <h2>Glossary</h2>
+      <div id="glossaryBody" class="glossary-body"></div>
+    </div>
+  </section>
+
+  <header class="topbar">
+    <div class="hud-date">
+      <p id="dateLabel">Year 1 - Winter</p>
+    </div>
+    <div class="hud-center">
+      <button id="tavernBtn" class="tavern-button" type="button">Tavern</button>
+    </div>
+    <div class="top-actions">
+      <span id="newGameBtn" class="text-action" role="button" tabindex="0">Menu</span>
+    </div>
+  </header>
+
+  <main class="board-shell">
+    <section class="world-ticker" id="worldGrid"></section>
+
+    <section class="placement-board">
+      <section class="panel roster-panel">
+        <div class="section-heading">
+          <h2>Mercs</h2>
+          <span id="humanActionStatus" class="subtle"></span>
+        </div>
+        <div id="peopleGrid" class="token-grid"></div>
+        <div class="recovery-area">
+          <div class="recovery-label">Recovery</div>
+          <div id="recoveryGrid" class="recovery-slots"></div>
+        </div>
+      </section>
+
+      <section class="table-board">
+        <section class="panel contracts-panel">
+          <div id="contractGrid" class="contract-board"></div>
+        </section>
+
+        <section class="panel facilities-panel">
+          <div id="facilityGrid" class="facility-board"></div>
+        </section>
+      </section>
+    </section>
+  </main>
+
+  <aside class="leaderboard-track">
+    <div class="leaderboard-head">
+      <span>Guilds</span>
+      <span id="phaseLabel" class="pill">Setup</span>
+    </div>
+    <div id="guildGrid" class="guild-grid"></div>
+  </aside>
+
+  <button id="advanceBtn" class="primary season-button">Resolve Season</button>
+
+  <section class="detail-overlay closed" id="characterPanel" aria-modal="true" aria-labelledby="characterPanelTitle">
+    <div class="detail-modal">
+      <div class="tavern-header">
+        <div>
+          <p class="modal-eyebrow">Mercenary</p>
+          <h2 id="characterPanelTitle">Character Sheet</h2>
+        </div>
+        <span id="characterPanelClose" class="text-action tavern-close" role="button" tabindex="0">Close</span>
+      </div>
+      <div id="characterPanelBody"></div>
+    </div>
+  </section>
+
+  <section class="tavern-overlay" id="tavernPanel" aria-modal="true" aria-labelledby="tavernTitle">
+    <div class="tavern-modal">
+      <div class="tavern-header">
+        <div>
+          <p id="tavernEyebrow" class="modal-eyebrow">Tavern</p>
+          <h2 id="tavernTitle">Choose a Founder</h2>
+        </div>
+        <span id="tavernClose" class="text-action tavern-close" role="button" tabindex="0">Close</span>
+      </div>
+      <div id="recruitGrid" class="tavern-grid"></div>
+    </div>
+  </section>
+
+  <script src="bundle.js"></script>
+</body>
+</html>

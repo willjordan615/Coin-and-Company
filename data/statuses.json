@@ -1,0 +1,7 @@
+[
+  {"id":"pauper","name":"Pauper","recruitCost":2,"salary":1,"startingGold":8},
+  {"id":"commoner","name":"Commoner","recruitCost":5,"salary":2,"startingGold":12},
+  {"id":"professional","name":"Professional","recruitCost":9,"salary":3,"startingGold":16},
+  {"id":"gentry","name":"Gentry","recruitCost":14,"salary":4,"startingGold":22},
+  {"id":"noble","name":"Noble","recruitCost":22,"salary":6,"startingGold":32}
+]

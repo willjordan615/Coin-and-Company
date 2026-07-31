@@ -1,0 +1,14 @@
+[
+  {"id":"mara-vale","name":"Mara Vale","archetype":"Young Smith","status":"gentry","traits":["Smith","Craftsman","Noble"],"resources":1,"connections":2},
+  {"id":"edwin-stone","name":"Edwin Stone","archetype":"Village Blacksmith","status":"commoner","traits":["Smith","Craftsman","Strong"],"resources":2,"connections":0},
+  {"id":"lina-reed","name":"Lina Reed","archetype":"Herbalist","status":"commoner","traits":["Healer","Rural","Patient"],"resources":1,"connections":1},
+  {"id":"corvin-ash","name":"Corvin Ash","archetype":"Disgraced Soldier","status":"professional","traits":["Soldier","Veteran","Disgraced"],"resources":1,"connections":0},
+  {"id":"tomas-pell","name":"Tomas Pell","archetype":"Scribe","status":"commoner","traits":["Scholar","Clerk","Careful"],"resources":0,"connections":1},
+  {"id":"yara-fen","name":"Yara Fen","archetype":"Hunter","status":"pauper","traits":["Hunter","Rural","Scout"],"resources":1,"connections":0},
+  {"id":"alric-voss","name":"Alric Voss","archetype":"Minor Noble","status":"noble","traits":["Noble","Diplomat","Connected"],"resources":1,"connections":4},
+  {"id":"brenna-coal","name":"Brenna Coal","archetype":"Miner","status":"pauper","traits":["Miner","Strong","Rural"],"resources":2,"connections":0},
+  {"id":"sel-ward","name":"Sel Ward","archetype":"Carpenter","status":"commoner","traits":["Builder","Craftsman","Practical"],"resources":2,"connections":0},
+  {"id":"irene-moss","name":"Irene Moss","archetype":"Temple Acolyte","status":"commoner","traits":["Faithful","Healer","Scholar"],"resources":0,"connections":1},
+  {"id":"darian-crow","name":"Darian Crow","archetype":"Former Smuggler","status":"professional","traits":["Criminal","Merchant","Scout"],"resources":1,"connections":3},
+  {"id":"oma-bright","name":"Oma Bright","archetype":"Mason","status":"professional","traits":["Builder","Stoneworker","Craftsman"],"resources":2,"connections":0}
+]
