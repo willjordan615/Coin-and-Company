@@ -1,6 +1,11 @@
 @echo off
 REM Run the game locally (Windows). Builds bundle if Node is available, serves files via Python, and opens browser.
 SETLOCAL
+REM Change to project folder so paths with spaces work (user requested)
+cd /d "C:\Users\wtsna\Desktop\Coin and Company\Coin and Company"
+IF %ERRORLEVEL% NEQ 0 (
+  echo Warning: failed to change to project directory. Continuing in current directory.
+)
 
 REM Optional: build with Node if available
 where node >nul 2>&1

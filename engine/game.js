@@ -1502,7 +1502,7 @@ export class Game {
       if(!this._useMonteWorker) return;
       if(this._browserMonteWorker) return;
       try{
-        this._browserMonteWorker = new Worker('./ai-worker-browser.js', { type: 'module' });
+        this._browserMonteWorker = new Worker('./engine/ai-worker-browser.js', { type: 'module' });
         this._browserMonteWorker.onmessage = (ev)=>{
           const { id, ok, result, error } = ev.data || {};
           const resolver = this._browserMonteResolvers.get(id);
