@@ -1048,13 +1048,22 @@ export class Game {
     const target=Math.min(mode.rebuilding?1:this.aiProfileValue(guild,'facilityWorkers',2),this.availableWorkers(guild).length);
     const placed=[];
     while(placed.length<target){
-      const worker=this.chooseFacilityWorker(guild);
-      if(!worker)break;
-      const facility=this.chooseFacility(guild,worker);
-      if(!facility)break;
-      if(this.facilityWorkers(guild,facility.key,'work').length>=facility.slots)break;
-      worker.placement={type:'facility',id:facility.key,mode:'work'};
-      placed.push(`${worker.name} to the ${facility.label}`);
+      let choice=null;
+      // Use Monte Carlo to select facility placement during early game in headless mode
+      if(!this.isSimulation && this.state.year<=2 && typeof window==='undefined'){
+        choice = this.monteCarloSelectFacilityPlacement(guild, 3, 1);
+      }
+      if(!choice){
+        const worker=this.chooseFacilityWorker(guild);
+        if(!worker)break;
+        const facility=this.chooseFacility(guild,worker);
+        if(!facility)break;
+        if(this.facilityWorkers(guild,facility.key,'work').length>=facility.slots)break;
+        choice = {worker, facility};
+      }
+      if(!choice)break;
+      choice.worker.placement={type:'facility',id:choice.facility.key,mode:'work'};
+      placed.push(`${choice.worker.name} to the ${choice.facility.label}`);
       if(Math.random()>0.65)break;
     }
     if(!placed.length)return false;
@@ -1378,6 +1387,65 @@ export class Game {
       }
     }
     return (restScore / trials) > (continueScore / trials);
+  }
+
+  monteCarloSelectFacilityPlacement(guild, trials=3, seasons=1){
+    // Gather all candidate (worker, facility) pairings
+    const candidates = [];
+    for(const worker of this.availableWorkers(guild)){
+      const facility = this.chooseFacility(guild, worker);
+      if(facility && this.facilityHasOpenSlot(guild, facility, worker)){
+        candidates.push({worker, facility});
+      }
+    }
+    if(!candidates.length) return null;
+    if(candidates.length === 1) return candidates[0];
+    
+    const totals = new Map();
+    for(const c of candidates) totals.set(`${c.worker.id}-${c.facility.key}`, 0);
+    
+    for(const c of candidates){
+      for(let t=0;t<trials;t++){
+        try{
+          const sim = new Game();
+          sim.isSimulation = true;
+          sim.render = ()=>{};
+          sim.bindDropSlots = ()=>{};
+          sim.openTraitChoice = ()=>{};
+          sim.data = structuredClone(this.data);
+          sim.state = structuredClone(this.state);
+          if(sim.rehydrateLoadedState) sim.rehydrateLoadedState();
+          sim.state.guilds.forEach(g=>g.human=false);
+          const gcopy = sim.state.guilds.find(x=>x.id===guild.id);
+          if(!gcopy) continue;
+          const wcopy = gcopy.roster.find(x=>x.id===c.worker.id);
+          if(!wcopy) continue;
+          // apply facility placement
+          wcopy.placement = {type:'facility', id:c.facility.key, mode:'work'};
+          // simulate forward
+          for(let s=0;s<seasons;s++){
+            if(sim.state.phase==='awaitHuman' || sim.state.phase==='seasonStart'){
+              for(const g of sim.snakeGuildOrder().filter(x=>!x.human)){
+                if(sim.aiTurn) sim.aiTurn(g);
+              }
+            }
+            if(sim.state.phase==='seasonComplete' && sim.nextSeason) sim.nextSeason();
+            if(sim.state.phase==='gameOver') break;
+          }
+          const gscore = (gcopy.reputation||0) + (gcopy.completed||0) + ((gcopy.gold||0)/10);
+          totals.set(`${c.worker.id}-${c.facility.key}`, (totals.get(`${c.worker.id}-${c.facility.key}`)||0) + gscore);
+        }catch(e){
+          // ignore
+        }
+      }
+    }
+    let best=null, bestAvg=-Infinity;
+    for(const c of candidates){
+      const total = totals.get(`${c.worker.id}-${c.facility.key}`) || 0;
+      const avg = total / trials;
+      if(avg > bestAvg){ bestAvg = avg; best = c; }
+    }
+    return best;
   }
   weightedPick(options){const total=options.reduce((s,o)=>s+o.weight,0);let r=Math.random()*total;return (options.find(o=>(r-=o.weight)<=0)||options[0])?.item||null;}
   hire(guild,c,free,cost=null,{sponsored=false}={}){
