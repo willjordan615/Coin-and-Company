@@ -1,6 +1,8 @@
 const SEASONS = ['Winter','Spring','Summer','Fall'];
 const SAVE_KEY = 'coin-and-company-save-v1';
 
+import { createAiSim } from './ai-sim.js';
+
 export class Game {
   constructor() {
     this.state = null;
@@ -9,6 +11,10 @@ export class Game {
     this.pendingGuildName = 'Amber Company';
     this.menuOpen = true;
     this.isSimulation = false;
+    // Monte Carlo instrumentation
+    this._monteStats = { calls: 0, trials: 0, timeMs: 0, abortedTrials: 0 };
+    // ai-sim helper instance (created lazily)
+    this._aiSim = null;
   }
 
   async init() {
@@ -716,7 +722,8 @@ export class Game {
       // Use Monte Carlo to pick best contract placement during early game in headless mode
       let pick=null;
       if(!this.isSimulation && this.state.year===1 && this.state.seasonIndex<2 && typeof window==='undefined' && options.length>1){
-        pick = this.monteCarloSelectPlacement(guild, options, minChance, 3, 1);
+        const m = this.monteSettings ? this.monteSettings() : null;
+        pick = this.monteCarloSelectPlacement(guild, options, minChance, m?.placementTrials ?? 3, m?.placementSeasons ?? 1);
       }
       if(!pick){
         const viable=options.filter(o=>o.chance>=minChance);
@@ -964,9 +971,11 @@ export class Game {
     // Use Monte Carlo to decide between rest and facility placements during early game
     let shouldRest=false;
     if(!this.isSimulation && this.state.year===1 && this.state.seasonIndex<2 && typeof window==='undefined' && this.guildNeedsRest(guild)){
-      shouldRest = this.monteCarloShouldRest(guild, mode);
+    const m = this.monteSettings ? this.monteSettings() : null;
+    if(m?.enabled) shouldRest = this.monteCarloShouldRest(guild, mode, m.restTrials, m.restSeasons);
+    else shouldRest = Math.random()<this.aiRestChance(guild,mode);
     } else if(this.guildNeedsRest(guild)&&Math.random()<this.aiRestChance(guild,mode)){
-      shouldRest = true;
+    shouldRest = true;
     }
     if(shouldRest){this.log(guild,'rest',this.restGuild(guild));return true;}
     
@@ -1051,7 +1060,8 @@ export class Game {
       let choice=null;
       // Use Monte Carlo to select facility placement during early game in headless mode
       if(!this.isSimulation && this.state.year<=2 && typeof window==='undefined'){
-        choice = this.monteCarloSelectFacilityPlacement(guild, 3, 1);
+        const m = this.monteSettings ? this.monteSettings() : null;
+        choice = this.monteCarloSelectFacilityPlacement(guild, m?.facilityTrials ?? 3, m?.facilitySeasons ?? 1);
       }
       if(!choice){
         const worker=this.chooseFacilityWorker(guild);
@@ -1208,8 +1218,9 @@ export class Game {
   }
   chooseRecruit(guild,arr=this.state.tavern){
     // Use Monte Carlo selection during setup and the first two seasons when running headless and NOT in a simulation.
-    if(!this.isSimulation && (this.state.phase==='setup' || (this.state.year===1 && this.state.seasonIndex<2)) && typeof window==='undefined'){
-      const pick = this.monteCarloSelectRecruit(guild, arr, 4, 1);
+    const m = this.monteSettings ? this.monteSettings() : null;
+    if(!this.isSimulation && m?.enabled && (this.state.phase==='setup' || (this.state.year===1 && this.state.seasonIndex<2)) && typeof window==='undefined'){
+      const pick = this.monteCarloSelectRecruit(guild, arr, m.recruitTrials, m.recruitSeasons);
       if(pick) return pick;
     }
     const target=[...this.state.boardContracts].sort((a,b)=>this.contractValue(guild,b)-this.contractValue(guild,a))[0];
@@ -1226,168 +1237,198 @@ export class Game {
     return targetFit+profileFit+traits.length*2+c.connections*3+c.resources*3-this.recruitCost(guild,c)/3+(mode.rebuilding?boardFit*0.45+cheapStarter+professionDemand:0);
   }
 
-  monteCarloSelectRecruit(guild, arr=this.state.tavern, trials=4, seasons=1){
+  monteCarloSelectRecruit(guild, arr=this.state.tavern, trials=3, seasons=1){
     if(!arr || !arr.length) return null;
     const totals = new Map();
     for(const c of arr) totals.set(c.id, 0);
-    for(const c of arr){
-      for(let t=0;t<trials;t++){
-        try{
-          const sim = new Game();
-          sim.isSimulation = true;
-          sim.render = ()=>{};
-          sim.bindDropSlots = ()=>{};
-          sim.openTraitChoice = ()=>{};
-          // copy data and state
-          sim.data = structuredClone(this.data);
-          sim.state = structuredClone(this.state);
-          if(sim.rehydrateLoadedState) sim.rehydrateLoadedState();
-          // force AI-only simulation
-          sim.state.guilds.forEach(g=>g.human=false);
-          const gcopy = sim.state.guilds.find(x=>x.id===guild.id);
-          if(!gcopy) continue;
-          // find matching candidate in simulated tavern
-          const candidate = sim.state.tavern.find(x=>x.id===c.id) || sim.state.tavern.find(x=>x.name===c.name);
-          if(!candidate) continue;
-          // apply the pick appropriately for setup vs normal
-          if(sim.state.phase==='setup' && sim.draftFounderForGuild) sim.draftFounderForGuild(gcopy,candidate);
-          else if(sim.hire) sim.hire(gcopy,candidate,false);
-          // simulate a small number of seasons (just 1, fast)
-          for(let s=0;s<seasons;s++){
-            if(sim.state.phase==='awaitHuman' || sim.state.phase==='seasonStart'){
-              // run AI for other guilds only, skip full turn sequence overhead
-              for(const g of sim.snakeGuildOrder().filter(x=>!x.human&&x.id!==guild.id)){
-                if(sim.aiTurn) sim.aiTurn(g);
-              }
+
+      // instrumentation + per-trial timeouts
+      const settings = this.monteSettings ? this.monteSettings() : {};
+      const maxTrialMs = (settings.maxTrialMs && Number(settings.maxTrialMs)) || (typeof process !== 'undefined' && process.env && Number(process.env.MONTE_MAX_TRIAL_MS)) || 5000;
+      const now = (typeof performance !== 'undefined') ? (()=>performance.now()) : (()=>Date.now());
+      this._monteStats.calls = (this._monteStats.calls||0) + 1;
+
+      // ensure ai-sim helper exists
+      if(!this._aiSim) this._aiSim = createAiSim(Game);
+
+      for(const c of arr){
+        for(let t=0;t<trials;t++){
+          const tStart = now();
+          try{
+            let score;
+                        const pool = globalThis.__MONTE_POOL;
+                        if(pool && typeof pool.runTaskSync === 'function'){
+                          const res = pool.runTaskSync({data:this.data, state:this.state, guildId:guild.id, action:{type:'recruit', candidateId:c.id, candidateName:c.name}, seasons}, maxTrialMs);
+                          if(res && res.ok) score = Number(res.result) || 0;
+                          else { this._monteStats.abortedTrials = (this._monteStats.abortedTrials||0) + 1; break; }
+                        } else {
+                          score = this._aiSim.runSingleTrial({data:this.data, state:this.state, guildId:guild.id, action:{type:'recruit', candidateId:c.id, candidateName:c.name}, seasons});
+                        }
+                        totals.set(c.id, (totals.get(c.id)||0) + score);
+          }catch(e){
+            // ignore simulation failures
+          } finally {
+            const took = now() - tStart;
+            this._monteStats.trials = (this._monteStats.trials||0) + 1;
+            this._monteStats.timeMs = (this._monteStats.timeMs||0) + took;
+            if(took > maxTrialMs){
+              this._monteStats.abortedTrials = (this._monteStats.abortedTrials||0) + 1;
+              // abort remaining trials for this candidate if a trial took too long
+              break;
             }
-            if(sim.state.phase==='seasonComplete' && sim.nextSeason) sim.nextSeason();
-            if(sim.state.phase==='gameOver') break;
           }
-          const gscore = (gcopy.reputation||0) + (gcopy.completed||0) + ((gcopy.gold||0)/10);
-          totals.set(c.id, (totals.get(c.id)||0) + gscore);
-        }catch(e){
-          // ignore simulation failures
         }
       }
+      let best=null, bestAvg=-Infinity;
+      for(const c of arr){
+        const total = totals.get(c.id) || 0;
+        const avg = total / trials;
+        if(avg>bestAvg){ bestAvg=avg; best=c; }
+      }
+      return best;
     }
-    let best=null, bestAvg=-Infinity;
-    for(const c of arr){
-      const total = totals.get(c.id) || 0;
-      const avg = total / trials;
-      if(avg>bestAvg){ bestAvg=avg; best=c; }
-    }
-    return best;
-  }
 
   monteCarloSelectPlacement(guild, options, minChance, trials=3, seasons=1){
     if(!options || !options.length) return null;
     const totals = new Map();
     for(const o of options) totals.set(o.contract.instanceId, 0);
-    for(const o of options){
-      for(let t=0;t<trials;t++){
-        try{
-          const sim = new Game();
-          sim.isSimulation = true;
-          sim.render = ()=>{};
-          sim.bindDropSlots = ()=>{};
-          sim.openTraitChoice = ()=>{};
-          sim.data = structuredClone(this.data);
-          sim.state = structuredClone(this.state);
-          if(sim.rehydrateLoadedState) sim.rehydrateLoadedState();
-          sim.state.guilds.forEach(g=>g.human=false);
-          const gcopy = sim.state.guilds.find(x=>x.id===guild.id);
-          if(!gcopy) continue;
-          const contractCopy = sim.state.boardContracts.find(x=>x.instanceId===o.contract.instanceId);
-          if(!contractCopy) continue;
-          // apply placement
-          contractCopy.placements = contractCopy.placements || {};
-          const list = contractCopy.placements[gcopy.id] || [];
-          for(const w of o.add){
-            const wcopy = gcopy.roster.find(x=>x.id===w.id);
-            if(wcopy) list.push(wcopy.id);
-          }
-          contractCopy.placements[gcopy.id] = list;
-          // simulate forward
-          for(let s=0;s<seasons;s++){
-            if(sim.state.phase==='awaitHuman' || sim.state.phase==='seasonStart'){
-              for(const g of sim.snakeGuildOrder().filter(x=>!x.human)){
-                if(sim.aiTurn) sim.aiTurn(g);
-              }
+
+      // instrumentation + per-trial timeouts
+      const settings = this.monteSettings ? this.monteSettings() : {};
+      const maxTrialMs = (settings.maxTrialMs && Number(settings.maxTrialMs)) || (typeof process !== 'undefined' && process.env && Number(process.env.MONTE_MAX_TRIAL_MS)) || 5000;
+      const now = (typeof performance !== 'undefined') ? (()=>performance.now()) : (()=>Date.now());
+      this._monteStats.calls = (this._monteStats.calls||0) + 1;
+
+      for(const o of options){
+        for(let t=0;t<trials;t++){
+          const tStart = now();
+          try{
+            const sim = new Game();
+            sim.isSimulation = true;
+            sim.render = ()=>{};
+            sim.bindDropSlots = ()=>{};
+            sim.openTraitChoice = ()=>{};
+            sim.data = structuredClone(this.data);
+            sim.state = structuredClone(this.state);
+            if(sim.rehydrateLoadedState) sim.rehydrateLoadedState();
+            sim.state.guilds.forEach(g=>g.human=false);
+            const gcopy = sim.state.guilds.find(x=>x.id===guild.id);
+            if(!gcopy) continue;
+            const contractCopy = sim.state.boardContracts.find(x=>x.instanceId===o.contract.instanceId);
+            if(!contractCopy) continue;
+            // apply placement
+            contractCopy.placements = contractCopy.placements || {};
+            const list = contractCopy.placements[gcopy.id] || [];
+            for(const w of o.add){
+              const wcopy = gcopy.roster.find(x=>x.id===w.id);
+              if(wcopy) list.push(wcopy.id);
             }
-            if(sim.state.phase==='seasonComplete' && sim.nextSeason) sim.nextSeason();
-            if(sim.state.phase==='gameOver') break;
+            contractCopy.placements[gcopy.id] = list;
+            // simulate forward
+            for(let s=0;s<seasons;s++){
+              if(sim.state.phase==='awaitHuman' || sim.state.phase==='seasonStart'){
+                for(const g of sim.snakeGuildOrder().filter(x=>!x.human)){
+                  if(sim.aiTurn) sim.aiTurn(g);
+                }
+              }
+              if(sim.state.phase==='seasonComplete' && sim.nextSeason) sim.nextSeason();
+              if(sim.state.phase==='gameOver') break;
+            }
+            let score;
+            const pool = globalThis.__MONTE_POOL;
+            if(pool && typeof pool.runTaskSync === 'function'){
+              const res = pool.runTaskSync({data:this.data, state:this.state, guildId:guild.id, action:{type:'placement', contractId:o.contract.instanceId, addIds:o.add.map(w=>w.id)}, seasons}, maxTrialMs);
+              if(res && res.ok) score = Number(res.result) || 0;
+              else { this._monteStats.abortedTrials = (this._monteStats.abortedTrials||0) + 1; break; }
+            } else {
+              score = this._aiSim.runSingleTrial({data:this.data, state:this.state, guildId:guild.id, action:{type:'placement', contractId:o.contract.instanceId, addIds:o.add.map(w=>w.id)}, seasons});
+            }
+            totals.set(o.contract.instanceId, (totals.get(o.contract.instanceId)||0) + score);
+          }catch(e){
+            // ignore
+          } finally {
+            const took = now() - tStart;
+            this._monteStats.trials = (this._monteStats.trials||0) + 1;
+            this._monteStats.timeMs = (this._monteStats.timeMs||0) + took;
+            if(took > maxTrialMs){
+              this._monteStats.abortedTrials = (this._monteStats.abortedTrials||0) + 1;
+              // abort remaining trials for this option if a trial took too long
+              break;
+            }
           }
-          const gscore = (gcopy.reputation||0) + (gcopy.completed||0) + ((gcopy.gold||0)/10);
-          totals.set(o.contract.instanceId, (totals.get(o.contract.instanceId)||0) + gscore);
-        }catch(e){
-          // ignore
         }
       }
+      let best=null, bestAvg=-Infinity;
+      for(const o of options){
+        const total = totals.get(o.contract.instanceId) || 0;
+        const avg = total / trials;
+        if(avg > bestAvg){ bestAvg = avg; best = o; }
+      }
+      return best;
     }
-    let best=null, bestAvg=-Infinity;
-    for(const o of options){
-      const total = totals.get(o.contract.instanceId) || 0;
-      const avg = total / trials;
-      if(avg > bestAvg){ bestAvg = avg; best = o; }
-    }
-    return best;
-  }
 
   monteCarloShouldRest(guild, mode, trials=3, seasons=1){
     // Compare rest vs. continue scenario
     let restScore = 0, continueScore = 0;
-    for(let t=0;t<trials;t++){
-      try{
-        // Simulate with rest
-        const simRest = new Game();
-        simRest.isSimulation = true;
-        simRest.render = ()=>{};
-        simRest.bindDropSlots = ()=>{};
-        simRest.openTraitChoice = ()=>{};
-        simRest.data = structuredClone(this.data);
-        simRest.state = structuredClone(this.state);
-        if(simRest.rehydrateLoadedState) simRest.rehydrateLoadedState();
-        simRest.state.guilds.forEach(g=>g.human=false);
-        const gRest = simRest.state.guilds.find(x=>x.id===guild.id);
-        if(gRest && simRest.restGuild) simRest.restGuild(gRest);
-        for(let s=0;s<seasons;s++){
-          if(simRest.state.phase==='awaitHuman' || simRest.state.phase==='seasonStart'){
-            for(const g of simRest.snakeGuildOrder().filter(x=>!x.human&&x.id!==guild.id)){
-              if(simRest.aiTurn) simRest.aiTurn(g);
-            }
-          }
-          if(simRest.state.phase==='seasonComplete' && simRest.nextSeason) simRest.nextSeason();
-          if(simRest.state.phase==='gameOver') break;
-        }
-        restScore += (gRest.reputation||0) + (gRest.completed||0) + ((gRest.gold||0)/10);
 
-        // Simulate without rest
-        const simCont = new Game();
-        simCont.isSimulation = true;
-        simCont.render = ()=>{};
-        simCont.bindDropSlots = ()=>{};
-        simCont.openTraitChoice = ()=>{};
-        simCont.data = structuredClone(this.data);
-        simCont.state = structuredClone(this.state);
-        if(simCont.rehydrateLoadedState) simCont.rehydrateLoadedState();
-        simCont.state.guilds.forEach(g=>g.human=false);
-        const gCont = simCont.state.guilds.find(x=>x.id===guild.id);
-        for(let s=0;s<seasons;s++){
-          if(simCont.state.phase==='awaitHuman' || simCont.state.phase==='seasonStart'){
-            for(const g of simCont.snakeGuildOrder().filter(x=>!x.human&&x.id!==guild.id)){
-              if(simCont.aiTurn) simCont.aiTurn(g);
-            }
+      // instrumentation + per-trial timeouts
+      const settings = this.monteSettings ? this.monteSettings() : {};
+      const maxTrialMs = (settings.maxTrialMs && Number(settings.maxTrialMs)) || (typeof process !== 'undefined' && process.env && Number(process.env.MONTE_MAX_TRIAL_MS)) || 5000;
+      const now = (typeof performance !== 'undefined') ? (()=>performance.now()) : (()=>Date.now());
+      this._monteStats.calls = (this._monteStats.calls||0) + 1;
+
+      for(let t=0;t<trials;t++){
+        const tStart = now();
+        try{
+          // use ai-sim helper to run rest vs continue trials
+          if(!this._aiSim) this._aiSim = createAiSim(Game);
+          let gRestScore, gContScore;
+          const pool = globalThis.__MONTE_POOL;
+          if(pool && typeof pool.runTaskSync === 'function'){
+            const resRest = pool.runTaskSync({data:this.data, state:this.state, guildId:guild.id, action:{type:'rest'}, seasons}, maxTrialMs);
+            if(resRest && resRest.ok) gRestScore = Number(resRest.result) || 0;
+            else { this._monteStats.abortedTrials = (this._monteStats.abortedTrials||0) + 1; break; }
+            const resCont = pool.runTaskSync({data:this.data, state:this.state, guildId:guild.id, action:{type:'none'}, seasons}, maxTrialMs);
+            if(resCont && resCont.ok) gContScore = Number(resCont.result) || 0;
+            else { this._monteStats.abortedTrials = (this._monteStats.abortedTrials||0) + 1; break; }
+          } else {
+            gRestScore = this._aiSim.runSingleTrial({data:this.data, state:this.state, guildId:guild.id, action:{type:'rest'}, seasons});
+            gContScore = this._aiSim.runSingleTrial({data:this.data, state:this.state, guildId:guild.id, action:{type:'none'}, seasons});
           }
-          if(simCont.state.phase==='seasonComplete' && simCont.nextSeason) simCont.nextSeason();
-          if(simCont.state.phase==='gameOver') break;
+          restScore += gRestScore;
+          continueScore += gContScore;
+        }catch(e){
+          // ignore
+        } finally {
+          const took = now() - tStart;
+          this._monteStats.trials = (this._monteStats.trials||0) + 1;
+          this._monteStats.timeMs = (this._monteStats.timeMs||0) + took;
+          if(took > maxTrialMs){
+            this._monteStats.abortedTrials = (this._monteStats.abortedTrials||0) + 1;
+            // abort remaining rest-vs-continue trials if one trial is too slow
+            break;
+          }
         }
-        continueScore += (gCont.reputation||0) + (gCont.completed||0) + ((gCont.gold||0)/10);
-      }catch(e){
-        // ignore
       }
+      return (restScore / trials) > (continueScore / trials);
     }
-    return (restScore / trials) > (continueScore / trials);
-  }
+
+  monteSettings(){
+    const s = this.data?.contractParts?.settings?.monteCarlo || {};
+    return {
+      enabled: s.enabled ?? true,
+        recruitTrials: s.recruitTrials ?? 3,
+      recruitSeasons: s.recruitSeasons ?? 1,
+      placementTrials: s.placementTrials ?? 3,
+      placementSeasons: s.placementSeasons ?? 1,
+      facilityTrials: s.facilityTrials ?? 3,
+      facilitySeasons: s.facilitySeasons ?? 1,
+      restTrials: s.restTrials ?? 3,
+        restSeasons: s.restSeasons ?? 1,
+        // maxTrialMs: optional override (ms) to abort slow trials; can be set in data.contractParts.settings.monteCarlo.maxTrialMs or MONTE_MAX_TRIAL_MS env
+        maxTrialMs: s.maxTrialMs ?? null
+      };
+    }
 
   monteCarloSelectFacilityPlacement(guild, trials=3, seasons=1){
     // Gather all candidate (worker, facility) pairings
@@ -1403,50 +1444,75 @@ export class Game {
     
     const totals = new Map();
     for(const c of candidates) totals.set(`${c.worker.id}-${c.facility.key}`, 0);
-    
-    for(const c of candidates){
-      for(let t=0;t<trials;t++){
-        try{
-          const sim = new Game();
-          sim.isSimulation = true;
-          sim.render = ()=>{};
-          sim.bindDropSlots = ()=>{};
-          sim.openTraitChoice = ()=>{};
-          sim.data = structuredClone(this.data);
-          sim.state = structuredClone(this.state);
-          if(sim.rehydrateLoadedState) sim.rehydrateLoadedState();
-          sim.state.guilds.forEach(g=>g.human=false);
-          const gcopy = sim.state.guilds.find(x=>x.id===guild.id);
-          if(!gcopy) continue;
-          const wcopy = gcopy.roster.find(x=>x.id===c.worker.id);
-          if(!wcopy) continue;
-          // apply facility placement
-          wcopy.placement = {type:'facility', id:c.facility.key, mode:'work'};
-          // simulate forward
-          for(let s=0;s<seasons;s++){
-            if(sim.state.phase==='awaitHuman' || sim.state.phase==='seasonStart'){
-              for(const g of sim.snakeGuildOrder().filter(x=>!x.human)){
-                if(sim.aiTurn) sim.aiTurn(g);
+
+      // instrumentation + per-trial timeouts
+      const settings = this.monteSettings ? this.monteSettings() : {};
+      const maxTrialMs = (settings.maxTrialMs && Number(settings.maxTrialMs)) || (typeof process !== 'undefined' && process.env && Number(process.env.MONTE_MAX_TRIAL_MS)) || 5000;
+      const now = (typeof performance !== 'undefined') ? (()=>performance.now()) : (()=>Date.now());
+      this._monteStats.calls = (this._monteStats.calls||0) + 1;
+
+      for(const c of candidates){
+        for(let t=0;t<trials;t++){
+          const tStart = now();
+          try{
+            const sim = new Game();
+            sim.isSimulation = true;
+            sim.render = ()=>{};
+            sim.bindDropSlots = ()=>{};
+            sim.openTraitChoice = ()=>{};
+            sim.data = structuredClone(this.data);
+            sim.state = structuredClone(this.state);
+            if(sim.rehydrateLoadedState) sim.rehydrateLoadedState();
+            sim.state.guilds.forEach(g=>g.human=false);
+            const gcopy = sim.state.guilds.find(x=>x.id===guild.id);
+            if(!gcopy) continue;
+            const wcopy = gcopy.roster.find(x=>x.id===c.worker.id);
+            if(!wcopy) continue;
+            // apply facility placement
+            wcopy.placement = {type:'facility', id:c.facility.key, mode:'work'};
+            // simulate forward
+            for(let s=0;s<seasons;s++){
+              if(sim.state.phase==='awaitHuman' || sim.state.phase==='seasonStart'){
+                for(const g of sim.snakeGuildOrder().filter(x=>!x.human)){
+                  if(sim.aiTurn) sim.aiTurn(g);
+                }
               }
+              if(sim.state.phase==='seasonComplete' && sim.nextSeason) sim.nextSeason();
+              if(sim.state.phase==='gameOver') break;
             }
-            if(sim.state.phase==='seasonComplete' && sim.nextSeason) sim.nextSeason();
-            if(sim.state.phase==='gameOver') break;
+            let score;
+            const pool = globalThis.__MONTE_POOL;
+            if(pool && typeof pool.runTaskSync === 'function'){
+              const res = pool.runTaskSync({data:this.data, state:this.state, guildId:guild.id, action:{type:'facility', workerId:c.worker.id, facilityKey:c.facility.key}, seasons}, maxTrialMs);
+              if(res && res.ok) score = Number(res.result) || 0;
+              else { this._monteStats.abortedTrials = (this._monteStats.abortedTrials||0) + 1; break; }
+            } else {
+              const gscore = (gcopy.reputation||0) + (gcopy.completed||0) + ((gcopy.gold||0)/10);
+              score = gscore;
+            }
+            totals.set(`${c.worker.id}-${c.facility.key}`, (totals.get(`${c.worker.id}-${c.facility.key}`)||0) + score);
+          }catch(e){
+            // ignore
+          } finally {
+            const took = now() - tStart;
+            this._monteStats.trials = (this._monteStats.trials||0) + 1;
+            this._monteStats.timeMs = (this._monteStats.timeMs||0) + took;
+            if(took > maxTrialMs){
+              this._monteStats.abortedTrials = (this._monteStats.abortedTrials||0) + 1;
+              // abort remaining trials for this candidate if a trial took too long
+              break;
+            }
           }
-          const gscore = (gcopy.reputation||0) + (gcopy.completed||0) + ((gcopy.gold||0)/10);
-          totals.set(`${c.worker.id}-${c.facility.key}`, (totals.get(`${c.worker.id}-${c.facility.key}`)||0) + gscore);
-        }catch(e){
-          // ignore
         }
       }
+      let best=null, bestAvg=-Infinity;
+      for(const c of candidates){
+        const total = totals.get(`${c.worker.id}-${c.facility.key}`) || 0;
+        const avg = total / trials;
+        if(avg > bestAvg){ bestAvg = avg; best = c; }
+      }
+      return best;
     }
-    let best=null, bestAvg=-Infinity;
-    for(const c of candidates){
-      const total = totals.get(`${c.worker.id}-${c.facility.key}`) || 0;
-      const avg = total / trials;
-      if(avg > bestAvg){ bestAvg = avg; best = c; }
-    }
-    return best;
-  }
   weightedPick(options){const total=options.reduce((s,o)=>s+o.weight,0);let r=Math.random()*total;return (options.find(o=>(r-=o.weight)<=0)||options[0])?.item||null;}
   hire(guild,c,free,cost=null,{sponsored=false}={}){
     if(!c)return false;
