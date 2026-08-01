@@ -957,13 +957,16 @@ export class Game {
     this.render();
     const act=()=>{
       // aiTurn may be async when browser Monte Carlo is enabled; handle both
+      try{ this.showAiThinking(); }catch(e){}
       const result = this.aiTurn(guild);
       Promise.resolve(result).then(()=>{
+        try{ this.hideAiThinking(); }catch(e){}
         this.render();
         const next=()=>this.runAITurnSequence(guilds,done,index+1);
         if(delay>0)setTimeout(next,delay);
         else next();
       }).catch((e)=>{
+        try{ this.hideAiThinking(); }catch(ex){}
         console.error('aiTurn error',e);
         this.render();
         const next=()=>this.runAITurnSequence(guilds,done,index+1);
@@ -1014,6 +1017,37 @@ export class Game {
     if(mode.desperate&&this.activeWorkers(guild).length<4)return base*0.55;
     if(mode.rebuilding)return base*0.85;
     return base;
+  }
+
+  // UI helpers for browser Monte spinner
+  showAiThinking(){
+    try{
+      if(typeof document==='undefined') return;
+      if(this._aiThinkingEl) return;
+      const el = document.createElement('div');
+      el.id = 'aiThinking';
+      el.style.position = 'fixed';
+      el.style.right = '12px';
+      el.style.top = '12px';
+      el.style.padding = '8px 12px';
+      el.style.background = 'rgba(0,0,0,0.75)';
+      el.style.color = 'white';
+      el.style.borderRadius = '6px';
+      el.style.zIndex = 9999;
+      el.style.fontFamily = 'sans-serif';
+      el.style.fontSize = '13px';
+      el.textContent = 'AI thinking...';
+      document.body.appendChild(el);
+      this._aiThinkingEl = el;
+    }catch(e){console.warn('showAiThinking failed',e);}    
+  }
+
+  hideAiThinking(){
+    try{
+      if(!this._aiThinkingEl) return;
+      this._aiThinkingEl.remove();
+      this._aiThinkingEl = null;
+    }catch(e){console.warn('hideAiThinking failed',e);}    
   }
   aiFacilityChance(guild,mode=this.aiStrategicMode(guild)){
     const base=this.aiProfileValue(guild,'facilityChance',0.35);
