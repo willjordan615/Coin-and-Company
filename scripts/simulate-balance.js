@@ -1,7 +1,14 @@
 import fs from 'fs';
+import os from 'os';
 import { Game } from '../engine/game.js';
+import { initMontePool } from './monte-pool.js';
 
 const games = Number(process.argv[2] || 20);
+const numWorkers = Number(process.env.MONTE_WORKERS || Math.max(1, os.cpus().length - 1));
+// initialize worker pool for monte trials (headless only)
+let montePool = null;
+try{ montePool = initMontePool(numWorkers); }catch(e){ console.warn('Failed to init monte pool:',e); }
+
 const baseSeed = Number(process.argv[3] || 4242);
 const seasonLimit = Number(process.argv[4] || 80);
 
@@ -36,6 +43,8 @@ function loadGame() {
   game.render = () => {};
   game.bindDropSlots = () => {};
   game.openTraitChoice = () => {};
+  // monte instrumentation per-game
+  game._monteStats = { calls: 0, trials: 0, timeMs: 0, abortedTrials: 0 };
   game.data = {
     statuses: readJson('data/statuses.json'),
     recruits: readJson('data/recruits.json'),
@@ -45,6 +54,22 @@ function loadGame() {
     lastNames: readJson('data/last_names.json'),
     aiProfiles: readJson('data/ai_profiles.json')
   };
+  // allow overriding monte carlo trial counts via environment variable MONTE_TRIALS
+  const envTrials = Number(process.env.MONTE_TRIALS || 0);
+  if(envTrials > 0){
+    game.data.contractParts.settings = game.data.contractParts.settings || {};
+    game.data.contractParts.settings.monteCarlo = game.data.contractParts.settings.monteCarlo || {};
+    game.data.contractParts.settings.monteCarlo.enabled = true;
+    game.data.contractParts.settings.monteCarlo.recruitTrials = envTrials;
+    game.data.contractParts.settings.monteCarlo.placementTrials = envTrials;
+    game.data.contractParts.settings.monteCarlo.facilityTrials = envTrials;
+    game.data.contractParts.settings.monteCarlo.restTrials = envTrials;
+    // keep seasons conservative
+    game.data.contractParts.settings.monteCarlo.recruitSeasons = 1;
+    game.data.contractParts.settings.monteCarlo.placementSeasons = 1;
+    game.data.contractParts.settings.monteCarlo.facilitySeasons = 1;
+    game.data.contractParts.settings.monteCarlo.restSeasons = 1;
+  }
   game.data.contracts = game.expandContracts(readJson('data/contracts.json'), game.data.contractParts, game.data.characterParts);
   return game;
 }
@@ -150,6 +175,9 @@ function runGame(seed) {
     stats.conditions = stats.finalGuilds.reduce((sum, g) => sum + g.conditions, 0);
     stats.winner = stats.finalGuilds[0].name;
     stats.topScore = stats.finalGuilds[0].score;
+
+    // surface monte stats collected during this run
+    stats.monte = game._monteStats || { calls:0, trials:0, timeMs:0, abortedTrials:0 };
     return stats;
   } finally {
     Math.random = previousRandom;
@@ -248,5 +276,8 @@ const samples = results.slice(0, Math.min(3, games)).map(result => ({
   failures: result.failures,
   finalGuilds: result.finalGuilds
 }));
+
+// destroy worker pool if present
+if(montePool && typeof montePool.destroy === 'function') montePool.destroy();
 
 console.log(JSON.stringify({ summary, profiles, samples }, null, 2));
