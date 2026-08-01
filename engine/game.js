@@ -15,6 +15,10 @@ export class Game {
     this._monteStats = { calls: 0, trials: 0, timeMs: 0, abortedTrials: 0 };
     // ai-sim helper instance (created lazily)
     this._aiSim = null;
+    // browser monte worker
+    this._browserMonteWorker = null;
+    this._browserMonteResolvers = new Map();
+    this._useMonteWorker = (typeof window !== 'undefined' && typeof Worker !== 'undefined');
   }
 
   async init() {
@@ -713,16 +717,18 @@ export class Game {
     return this.bestWorkersForContract(this.availableWorkers(guild),contract,2);
   }
   bestWorkersForContract(workers,contract,limit){return workers.map(c=>({c,score:this.characterFit(c,contract)})).sort((a,b)=>b.score-a.score).slice(0,limit).map(x=>x.c);}
-  aiPlaceContractWorkers(guild){
+  async aiPlaceContractWorkers(guild){
     const minChance=this.aiMinClaimChance(guild);
     let placed=0;
     while(this.availableWorkers(guild).length){
       const options=this.state.boardContracts.map(contract=>this.aiContractPlacementOption(guild,contract)).filter(Boolean).sort((a,b)=>b.value-a.value);
       if(!options.length)break;
-      // Use Monte Carlo to pick best contract placement during early game in headless mode
+      // Use Monte Carlo to pick best contract placement during early game
       let pick=null;
-      if(!this.isSimulation && this.state.year===1 && this.state.seasonIndex<2 && typeof window==='undefined' && options.length>1){
-        const m = this.monteSettings ? this.monteSettings() : null;
+      const m = this.monteSettings ? this.monteSettings() : null;
+      if(this._useMonteWorker && !this.isSimulation && this.state.year===1 && this.state.seasonIndex<2 && options.length>1 && m?.enabled){
+        pick = await this.monteCarloSelectPlacementAsync(guild, options, minChance, m.placementTrials, m.placementSeasons);
+      } else if(!this.isSimulation && this.state.year===1 && this.state.seasonIndex<2 && typeof window==='undefined' && options.length>1){
         pick = this.monteCarloSelectPlacement(guild, options, minChance, m?.placementTrials ?? 3, m?.placementSeasons ?? 1);
       }
       if(!pick){
@@ -950,42 +956,56 @@ export class Game {
     this.state.phase='aiTurn';
     this.render();
     const act=()=>{
-      this.aiTurn(guild);
-      this.render();
-      const next=()=>this.runAITurnSequence(guilds,done,index+1);
-      if(delay>0)setTimeout(next,delay);
-      else next();
+      // aiTurn may be async when browser Monte Carlo is enabled; handle both
+      const result = this.aiTurn(guild);
+      Promise.resolve(result).then(()=>{
+        this.render();
+        const next=()=>this.runAITurnSequence(guilds,done,index+1);
+        if(delay>0)setTimeout(next,delay);
+        else next();
+      }).catch((e)=>{
+        console.error('aiTurn error',e);
+        this.render();
+        const next=()=>this.runAITurnSequence(guilds,done,index+1);
+        if(delay>0)setTimeout(next,delay);
+        else next();
+      });
     };
     if(delay>0)setTimeout(act,delay);
     else act();
   }
 
-  aiTurn(guild){
+  async aiTurn(guild){
     const mode=this.aiStrategicMode(guild);
     const rosterCap=this.guildRosterCap();
     const coreSize=Math.min(mode.rebuilding?5:(this.data.contractParts.settings.aiCoreRosterSize||4),rosterCap);
     const targetRoster=Math.min(Math.max(this.aiProfileValue(guild,'rosterGoal',6),mode.rebuilding?6:0),rosterCap);
-    if(this.activeWorkers(guild).length<coreSize&&this.aiCatchUpRecruit(guild,coreSize))return true;
-    if(mode.desperate&&this.activeWorkers(guild).length<3&&this.aiEmergencyRecruit(guild))return true;
+    if(this.activeWorkers(guild).length<coreSize&&await this.aiCatchUpRecruit(guild,coreSize))return true;
+    if(mode.desperate&&this.activeWorkers(guild).length<3&&await this.aiEmergencyRecruit(guild))return true;
     
     // Use Monte Carlo to decide between rest and facility placements during early game
     let shouldRest=false;
-    if(!this.isSimulation && this.state.year===1 && this.state.seasonIndex<2 && typeof window==='undefined' && this.guildNeedsRest(guild)){
     const m = this.monteSettings ? this.monteSettings() : null;
-    if(m?.enabled) shouldRest = this.monteCarloShouldRest(guild, mode, m.restTrials, m.restSeasons);
-    else shouldRest = Math.random()<this.aiRestChance(guild,mode);
+    if(!this.isSimulation && this.state.year===1 && this.state.seasonIndex<2 && this.guildNeedsRest(guild)){
+      if(this._useMonteWorker && m?.enabled){
+        shouldRest = await this.monteCarloShouldRestAsync(guild, mode, m.restTrials, m.restSeasons);
+      } else if(m?.enabled && typeof window==='undefined'){
+        shouldRest = this.monteCarloShouldRest(guild, mode, m.restTrials, m.restSeasons);
+      } else {
+        shouldRest = Math.random()<this.aiRestChance(guild,mode);
+      }
     } else if(this.guildNeedsRest(guild)&&Math.random()<this.aiRestChance(guild,mode)){
-    shouldRest = true;
+      shouldRest = true;
     }
     if(shouldRest){this.log(guild,'rest',this.restGuild(guild));return true;}
     
-    if(this.activeWorkers(guild).length<targetRoster&&this.aiCatchUpRecruit(guild,this.activeWorkers(guild).length+1))return true;
-    if(mode.behind&&this.activeWorkers(guild).length<rosterCap&&!guild.hiredThisSeason&&Math.random()<0.45&&this.aiCatchUpRecruit(guild,this.activeWorkers(guild).length+1))return true;
-    const plannedSupport=this.availableWorkers(guild).length>3&&Math.random()<this.aiFacilityChance(guild,mode)&&this.aiPlaceFacility(guild);
-    if(this.aiPlaceContractWorkers(guild))return true;
+    if(this.activeWorkers(guild).length<targetRoster&&await this.aiCatchUpRecruit(guild,this.activeWorkers(guild).length+1))return true;
+    if(mode.behind&&this.activeWorkers(guild).length<rosterCap&&!guild.hiredThisSeason&&Math.random()<0.45&&await this.aiCatchUpRecruit(guild,this.activeWorkers(guild).length+1))return true;
+    const plannedSupport=this.availableWorkers(guild).length>3&&Math.random()<this.aiFacilityChance(guild,mode)&&await this.aiPlaceFacility(guild);
+    if(await this.aiPlaceContractWorkers(guild))return true;
     if((mode.desperate||(mode.behind&&guild.gold<10&&guild.reputation<10))&&this.aiLocalRecoveryWork(guild))return true;
-    if(Math.random()<this.aiFacilityChance(guild,mode)&&this.aiPlaceFacility(guild))return true;
-    if(plannedSupport||this.aiPlaceFacility(guild))return true;
+    if(Math.random()<this.aiFacilityChance(guild,mode)&&await this.aiPlaceFacility(guild))return true;
+    if(plannedSupport||await this.aiPlaceFacility(guild))return true;
     this.log(guild,'operate',`${guild.name} held workers in reserve.`);
     return true;
   }
@@ -1002,7 +1022,7 @@ export class Game {
     if(mode.behind)return Math.min(base,0.24);
     return base;
   }
-  aiCatchUpRecruit(guild,target){
+  async aiCatchUpRecruit(guild,target){
     let hired=0;
     if(guild.hiredThisSeason)return hired;
     while(this.activeWorkers(guild).length<target&&this.activeWorkers(guild).length<this.guildRosterCap()){
@@ -1013,7 +1033,14 @@ export class Game {
         affordable=this.state.tavern.filter(c=>!c.refusesGuildIds.includes(guild.id)&&this.canRecruit(guild,c));
       }
       if(!affordable.length)break;
-      const c=this.chooseRecruit(guild,affordable);
+      let c=null;
+      const m = this.monteSettings ? this.monteSettings() : null;
+      if(this._useMonteWorker && m?.enabled && (this.state.phase==='setup' || (this.state.year===1 && this.state.seasonIndex<2))){
+        c = await this.chooseRecruitAsync(guild,affordable, m.recruitTrials, m.recruitSeasons);
+      } else {
+        c = this.chooseRecruit(guild,affordable);
+      }
+      if(!c) break;
       if(!this.hire(guild,c,false))break;
       this.log(guild,'recruit',`${guild.name} recruited ${c.name}.`);
       hired++;
@@ -1021,7 +1048,7 @@ export class Game {
     }
     return hired;
   }
-  aiEmergencyRecruit(guild){
+  async aiEmergencyRecruit(guild){
     if(guild.hiredThisSeason||this.activeWorkers(guild).length>=this.guildRosterCap())return false;
     const eligible=()=>this.state.tavern.filter(c=>!c.refusesGuildIds.includes(guild.id)&&this.reputationRequirement(c)===0&&this.characterSalary(c)<=2);
     let candidates=eligible();
@@ -1029,7 +1056,11 @@ export class Game {
       this.refillTavern(this.state.tavern.length+4);
       candidates=eligible();
     }
-    const pick=this.chooseRecruit(guild,candidates);
+    let pick=null;
+    const m = this.monteSettings ? this.monteSettings() : null;
+    if(this._useMonteWorker && m?.enabled){
+      pick = await this.chooseRecruitAsync(guild,candidates, m.recruitTrials, m.recruitSeasons);
+    } else pick=this.chooseRecruit(guild,candidates);
     if(!pick)return false;
     this.hire(guild,pick,false,0,{sponsored:true});
     this.log(guild,'recruit',`${guild.name} took on ${pick.name} with deferred pay to rebuild.`);
@@ -1052,15 +1083,17 @@ export class Game {
     for(const contract of occupied)this.resolveBoardContract(guild,contract);
   }
 
-  aiPlaceFacility(guild){
+  async aiPlaceFacility(guild){
     const mode=this.aiStrategicMode(guild);
     const target=Math.min(mode.rebuilding?1:this.aiProfileValue(guild,'facilityWorkers',2),this.availableWorkers(guild).length);
     const placed=[];
     while(placed.length<target){
       let choice=null;
-      // Use Monte Carlo to select facility placement during early game in headless mode
-      if(!this.isSimulation && this.state.year<=2 && typeof window==='undefined'){
-        const m = this.monteSettings ? this.monteSettings() : null;
+      // Use Monte Carlo to select facility placement during early game
+      const m = this.monteSettings ? this.monteSettings() : null;
+      if(this._useMonteWorker && !this.isSimulation && this.state.year<=2){
+        choice = await this.monteCarloSelectFacilityPlacementAsync(guild, m?.facilityTrials ?? 3, m?.facilitySeasons ?? 1);
+      } else if(!this.isSimulation && this.state.year<=2 && typeof window==='undefined'){
         choice = this.monteCarloSelectFacilityPlacement(guild, m?.facilityTrials ?? 3, m?.facilitySeasons ?? 1);
       }
       if(!choice){
@@ -1428,6 +1461,99 @@ export class Game {
         // maxTrialMs: optional override (ms) to abort slow trials; can be set in data.contractParts.settings.monteCarlo.maxTrialMs or MONTE_MAX_TRIAL_MS env
         maxTrialMs: s.maxTrialMs ?? null
       };
+    }
+
+    // Browser worker helpers -------------------------------------------------
+    _ensureBrowserWorker(){
+      if(!this._useMonteWorker) return;
+      if(this._browserMonteWorker) return;
+      try{
+        this._browserMonteWorker = new Worker('./ai-worker-browser.js', { type: 'module' });
+        this._browserMonteWorker.onmessage = (ev)=>{
+          const { id, ok, result, error } = ev.data || {};
+          const resolver = this._browserMonteResolvers.get(id);
+          if(resolver){ resolver({ ok, result, error }); this._browserMonteResolvers.delete(id); }
+        };
+        this._browserMonteWorker.onerror = (e)=>{ console.error('browser monte worker error',e); };
+      }catch(e){
+        console.warn('Failed to start browser monte worker',e);
+        this._useMonteWorker = false;
+      }
+    }
+
+    _postBrowserTask(kind,payload,timeoutMs=3000){
+      return new Promise((resolve)=>{
+        if(!this._useMonteWorker){ resolve({ ok:false, error:'worker-not-available' }); return; }
+        this._ensureBrowserWorker();
+        const id = String(Math.random()).slice(2);
+        this._browserMonteResolvers.set(id, (res)=>resolve(res));
+        try{
+          this._browserMonteWorker.postMessage({ id, kind, payload });
+        }catch(e){
+          this._browserMonteResolvers.delete(id);
+          resolve({ ok:false, error:String(e) });
+          return;
+        }
+        // timeout fallback
+        setTimeout(()=>{
+          const resolver = this._browserMonteResolvers.get(id);
+          if(resolver){ this._browserMonteResolvers.delete(id); resolver({ ok:false, error:'timed-out' }); }
+        }, timeoutMs);
+      });
+    }
+
+    async chooseRecruitAsync(guild, arr=this.state.tavern, trials=3, seasons=1){
+      if(!arr || !arr.length) return null;
+      const settings = this.monteSettings ? this.monteSettings() : {};
+      const maxTrialMs = (settings.maxTrialMs && Number(settings.maxTrialMs)) || (typeof navigator !== 'undefined' && navigator.hardwareConcurrency?2000:2000);
+      const timeout = Math.max(1000, trials * maxTrialMs);
+      const payload = { candidates: arr.map(c=>({id:c.id,name:c.name})), trials, seasons, data:this.data, state:this.state, guildId:guild.id };
+      const res = await this._postBrowserTask('recruit', payload, timeout);
+      if(!res.ok) return null;
+      const bestId = res.result?.bestId;
+      return arr.find(x=>x.id===bestId) || null;
+    }
+
+    async monteCarloSelectPlacementAsync(guild, options, minChance, trials=3, seasons=1){
+      if(!options || !options.length) return null;
+      const payload = { options: options.map(o=>({contractId:o.contract.instanceId, addIds:o.add.map(w=>w.id)})), trials, seasons, data:this.data, state:this.state, guildId:guild.id };
+      const settings = this.monteSettings ? this.monteSettings() : {};
+      const maxTrialMs = (settings.maxTrialMs && Number(settings.maxTrialMs)) || 2000;
+      const timeout = Math.max(1000, trials * maxTrialMs);
+      const res = await this._postBrowserTask('placement', payload, timeout);
+      if(!res.ok) return null;
+      const bestContractId = res.result?.bestContractId;
+      return options.find(o=>o.contract.instanceId===bestContractId) || null;
+    }
+
+    async monteCarloSelectFacilityPlacementAsync(guild, trials=3, seasons=1){
+      const candidates = [];
+      for(const worker of this.availableWorkers(guild)){
+        const facility = this.chooseFacility(guild, worker);
+        if(facility && this.facilityHasOpenSlot(guild, facility, worker)) candidates.push({workerId:worker.id, facilityKey:facility.key});
+      }
+      if(!candidates.length) return null;
+      const payload = { candidates, trials, seasons, data:this.data, state:this.state, guildId:guild.id };
+      const settings = this.monteSettings ? this.monteSettings() : {};
+      const maxTrialMs = (settings.maxTrialMs && Number(settings.maxTrialMs)) || 2000;
+      const timeout = Math.max(1000, trials * maxTrialMs);
+      const res = await this._postBrowserTask('facility', payload, timeout);
+      if(!res.ok) return null;
+      const best = res.result?.best;
+      if(!best) return null;
+      const worker = guild.roster.find(x=>x.id===best.workerId) || this.availableWorkers(guild).find(x=>x.id===best.workerId);
+      const facility = this.facilityDef(best.facilityKey);
+      return worker && facility ? {worker, facility} : null;
+    }
+
+    async monteCarloShouldRestAsync(guild, mode, trials=3, seasons=1){
+      const settings = this.monteSettings ? this.monteSettings() : {};
+      const maxTrialMs = (settings.maxTrialMs && Number(settings.maxTrialMs)) || 2000;
+      const timeout = Math.max(1000, trials * maxTrialMs);
+      const payload = { trials, seasons, data:this.data, state:this.state, guildId:guild.id };
+      const res = await this._postBrowserTask('rest', payload, timeout);
+      if(!res.ok) return false;
+      return !!res.result?.chooseRest;
     }
 
   monteCarloSelectFacilityPlacement(guild, trials=3, seasons=1){
