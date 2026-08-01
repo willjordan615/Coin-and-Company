@@ -8,6 +8,7 @@ export class Game {
     this.ui = {};
     this.pendingGuildName = 'Amber Company';
     this.menuOpen = true;
+    this.isSimulation = false;
   }
 
   async init() {
@@ -1180,7 +1181,15 @@ export class Game {
     const worst=[...removable].sort((a,b)=>score(a)-score(b))[0];
     return score(newTrait)>score(worst)?worst:null;
   }
-  chooseRecruit(guild,arr=this.state.tavern){const target=[...this.state.boardContracts].sort((a,b)=>this.contractValue(guild,b)-this.contractValue(guild,a))[0];return [...arr].sort((a,b)=>this.recruitValue(guild,b,target)-this.recruitValue(guild,a,target))[0]||null;}
+  chooseRecruit(guild,arr=this.state.tavern){
+    // Use Monte Carlo selection during setup and the first two seasons when running headless and NOT in a simulation.
+    if(!this.isSimulation && (this.state.phase==='setup' || (this.state.year===1 && this.state.seasonIndex<2)) && typeof window==='undefined'){
+      const pick = this.monteCarloSelectRecruit(guild, arr, 4, 1);
+      if(pick) return pick;
+    }
+    const target=[...this.state.boardContracts].sort((a,b)=>this.contractValue(guild,b)-this.contractValue(guild,a))[0];
+    return [...arr].sort((a,b)=>this.recruitValue(guild,b,target)-this.recruitValue(guild,a,target))[0]||null;
+  }
   recruitValue(guild,c,target){
     const traits=this.visibleTraits(c);
     const mode=this.aiStrategicMode(guild);
@@ -1190,6 +1199,59 @@ export class Game {
     const cheapStarter=mode.rebuilding&&(this.reputationRequirement(c)===0?10:0)+(this.characterSalary(c)<=2?4:0);
     const professionDemand=this.state.boardContracts.some(contract=>contract.requirements.some(req=>req.trait===c.archetype))?7:0;
     return targetFit+profileFit+traits.length*2+c.connections*3+c.resources*3-this.recruitCost(guild,c)/3+(mode.rebuilding?boardFit*0.45+cheapStarter+professionDemand:0);
+  }
+
+  monteCarloSelectRecruit(guild, arr=this.state.tavern, trials=4, seasons=1){
+    if(!arr || !arr.length) return null;
+    const totals = new Map();
+    for(const c of arr) totals.set(c.id, 0);
+    for(const c of arr){
+      for(let t=0;t<trials;t++){
+        try{
+          const sim = new Game();
+          sim.isSimulation = true;
+          sim.render = ()=>{};
+          sim.bindDropSlots = ()=>{};
+          sim.openTraitChoice = ()=>{};
+          // copy data and state
+          sim.data = structuredClone(this.data);
+          sim.state = structuredClone(this.state);
+          if(sim.rehydrateLoadedState) sim.rehydrateLoadedState();
+          // force AI-only simulation
+          sim.state.guilds.forEach(g=>g.human=false);
+          const gcopy = sim.state.guilds.find(x=>x.id===guild.id);
+          if(!gcopy) continue;
+          // find matching candidate in simulated tavern
+          const candidate = sim.state.tavern.find(x=>x.id===c.id) || sim.state.tavern.find(x=>x.name===c.name);
+          if(!candidate) continue;
+          // apply the pick appropriately for setup vs normal
+          if(sim.state.phase==='setup' && sim.draftFounderForGuild) sim.draftFounderForGuild(gcopy,candidate);
+          else if(sim.hire) sim.hire(gcopy,candidate,false);
+          // simulate a small number of seasons (just 1, fast)
+          for(let s=0;s<seasons;s++){
+            if(sim.state.phase==='awaitHuman' || sim.state.phase==='seasonStart'){
+              // run AI for other guilds only, skip full turn sequence overhead
+              for(const g of sim.snakeGuildOrder().filter(x=>!x.human&&x.id!==guild.id)){
+                if(sim.aiTurn) sim.aiTurn(g);
+              }
+            }
+            if(sim.state.phase==='seasonComplete' && sim.nextSeason) sim.nextSeason();
+            if(sim.state.phase==='gameOver') break;
+          }
+          const gscore = (gcopy.reputation||0) + (gcopy.completed||0) + ((gcopy.gold||0)/10);
+          totals.set(c.id, (totals.get(c.id)||0) + gscore);
+        }catch(e){
+          // ignore simulation failures
+        }
+      }
+    }
+    let best=null, bestAvg=-Infinity;
+    for(const c of arr){
+      const total = totals.get(c.id) || 0;
+      const avg = total / trials;
+      if(avg>bestAvg){ bestAvg=avg; best=c; }
+    }
+    return best;
   }
   weightedPick(options){const total=options.reduce((s,o)=>s+o.weight,0);let r=Math.random()*total;return (options.find(o=>(r-=o.weight)<=0)||options[0])?.item||null;}
   hire(guild,c,free,cost=null,{sponsored=false}={}){
