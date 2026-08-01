@@ -713,9 +713,16 @@ export class Game {
     while(this.availableWorkers(guild).length){
       const options=this.state.boardContracts.map(contract=>this.aiContractPlacementOption(guild,contract)).filter(Boolean).sort((a,b)=>b.value-a.value);
       if(!options.length)break;
-      const viable=options.filter(o=>o.chance>=minChance);
-      const pool=viable.length?viable:options.slice(0,3);
-      const pick=this.weightedPick(pool.map((o,i)=>({item:o,weight:Math.max(1,o.value)+(pool.length-i)*3})));
+      // Use Monte Carlo to pick best contract placement during early game in headless mode
+      let pick=null;
+      if(!this.isSimulation && this.state.year===1 && this.state.seasonIndex<2 && typeof window==='undefined' && options.length>1){
+        pick = this.monteCarloSelectPlacement(guild, options, minChance, 3, 1);
+      }
+      if(!pick){
+        const viable=options.filter(o=>o.chance>=minChance);
+        const pool=viable.length?viable:options.slice(0,3);
+        pick=this.weightedPick(pool.map((o,i)=>({item:o,weight:Math.max(1,o.value)+(pool.length-i)*3})));
+      }
       if(!pick)break;
       if(pick.chance<minChance&&Math.random()>0.35*this.aiRisk(guild))break;
       pick.contract.placements=pick.contract.placements||{};
@@ -953,7 +960,16 @@ export class Game {
     const targetRoster=Math.min(Math.max(this.aiProfileValue(guild,'rosterGoal',6),mode.rebuilding?6:0),rosterCap);
     if(this.activeWorkers(guild).length<coreSize&&this.aiCatchUpRecruit(guild,coreSize))return true;
     if(mode.desperate&&this.activeWorkers(guild).length<3&&this.aiEmergencyRecruit(guild))return true;
-    if(this.guildNeedsRest(guild)&&Math.random()<this.aiRestChance(guild,mode)){this.log(guild,'rest',this.restGuild(guild));return true;}
+    
+    // Use Monte Carlo to decide between rest and facility placements during early game
+    let shouldRest=false;
+    if(!this.isSimulation && this.state.year===1 && this.state.seasonIndex<2 && typeof window==='undefined' && this.guildNeedsRest(guild)){
+      shouldRest = this.monteCarloShouldRest(guild, mode);
+    } else if(this.guildNeedsRest(guild)&&Math.random()<this.aiRestChance(guild,mode)){
+      shouldRest = true;
+    }
+    if(shouldRest){this.log(guild,'rest',this.restGuild(guild));return true;}
+    
     if(this.activeWorkers(guild).length<targetRoster&&this.aiCatchUpRecruit(guild,this.activeWorkers(guild).length+1))return true;
     if(mode.behind&&this.activeWorkers(guild).length<rosterCap&&!guild.hiredThisSeason&&Math.random()<0.45&&this.aiCatchUpRecruit(guild,this.activeWorkers(guild).length+1))return true;
     const plannedSupport=this.availableWorkers(guild).length>3&&Math.random()<this.aiFacilityChance(guild,mode)&&this.aiPlaceFacility(guild);
@@ -1252,6 +1268,116 @@ export class Game {
       if(avg>bestAvg){ bestAvg=avg; best=c; }
     }
     return best;
+  }
+
+  monteCarloSelectPlacement(guild, options, minChance, trials=3, seasons=1){
+    if(!options || !options.length) return null;
+    const totals = new Map();
+    for(const o of options) totals.set(o.contract.instanceId, 0);
+    for(const o of options){
+      for(let t=0;t<trials;t++){
+        try{
+          const sim = new Game();
+          sim.isSimulation = true;
+          sim.render = ()=>{};
+          sim.bindDropSlots = ()=>{};
+          sim.openTraitChoice = ()=>{};
+          sim.data = structuredClone(this.data);
+          sim.state = structuredClone(this.state);
+          if(sim.rehydrateLoadedState) sim.rehydrateLoadedState();
+          sim.state.guilds.forEach(g=>g.human=false);
+          const gcopy = sim.state.guilds.find(x=>x.id===guild.id);
+          if(!gcopy) continue;
+          const contractCopy = sim.state.boardContracts.find(x=>x.instanceId===o.contract.instanceId);
+          if(!contractCopy) continue;
+          // apply placement
+          contractCopy.placements = contractCopy.placements || {};
+          const list = contractCopy.placements[gcopy.id] || [];
+          for(const w of o.add){
+            const wcopy = gcopy.roster.find(x=>x.id===w.id);
+            if(wcopy) list.push(wcopy.id);
+          }
+          contractCopy.placements[gcopy.id] = list;
+          // simulate forward
+          for(let s=0;s<seasons;s++){
+            if(sim.state.phase==='awaitHuman' || sim.state.phase==='seasonStart'){
+              for(const g of sim.snakeGuildOrder().filter(x=>!x.human)){
+                if(sim.aiTurn) sim.aiTurn(g);
+              }
+            }
+            if(sim.state.phase==='seasonComplete' && sim.nextSeason) sim.nextSeason();
+            if(sim.state.phase==='gameOver') break;
+          }
+          const gscore = (gcopy.reputation||0) + (gcopy.completed||0) + ((gcopy.gold||0)/10);
+          totals.set(o.contract.instanceId, (totals.get(o.contract.instanceId)||0) + gscore);
+        }catch(e){
+          // ignore
+        }
+      }
+    }
+    let best=null, bestAvg=-Infinity;
+    for(const o of options){
+      const total = totals.get(o.contract.instanceId) || 0;
+      const avg = total / trials;
+      if(avg > bestAvg){ bestAvg = avg; best = o; }
+    }
+    return best;
+  }
+
+  monteCarloShouldRest(guild, mode, trials=3, seasons=1){
+    // Compare rest vs. continue scenario
+    let restScore = 0, continueScore = 0;
+    for(let t=0;t<trials;t++){
+      try{
+        // Simulate with rest
+        const simRest = new Game();
+        simRest.isSimulation = true;
+        simRest.render = ()=>{};
+        simRest.bindDropSlots = ()=>{};
+        simRest.openTraitChoice = ()=>{};
+        simRest.data = structuredClone(this.data);
+        simRest.state = structuredClone(this.state);
+        if(simRest.rehydrateLoadedState) simRest.rehydrateLoadedState();
+        simRest.state.guilds.forEach(g=>g.human=false);
+        const gRest = simRest.state.guilds.find(x=>x.id===guild.id);
+        if(gRest && simRest.restGuild) simRest.restGuild(gRest);
+        for(let s=0;s<seasons;s++){
+          if(simRest.state.phase==='awaitHuman' || simRest.state.phase==='seasonStart'){
+            for(const g of simRest.snakeGuildOrder().filter(x=>!x.human&&x.id!==guild.id)){
+              if(simRest.aiTurn) simRest.aiTurn(g);
+            }
+          }
+          if(simRest.state.phase==='seasonComplete' && simRest.nextSeason) simRest.nextSeason();
+          if(simRest.state.phase==='gameOver') break;
+        }
+        restScore += (gRest.reputation||0) + (gRest.completed||0) + ((gRest.gold||0)/10);
+
+        // Simulate without rest
+        const simCont = new Game();
+        simCont.isSimulation = true;
+        simCont.render = ()=>{};
+        simCont.bindDropSlots = ()=>{};
+        simCont.openTraitChoice = ()=>{};
+        simCont.data = structuredClone(this.data);
+        simCont.state = structuredClone(this.state);
+        if(simCont.rehydrateLoadedState) simCont.rehydrateLoadedState();
+        simCont.state.guilds.forEach(g=>g.human=false);
+        const gCont = simCont.state.guilds.find(x=>x.id===guild.id);
+        for(let s=0;s<seasons;s++){
+          if(simCont.state.phase==='awaitHuman' || simCont.state.phase==='seasonStart'){
+            for(const g of simCont.snakeGuildOrder().filter(x=>!x.human&&x.id!==guild.id)){
+              if(simCont.aiTurn) simCont.aiTurn(g);
+            }
+          }
+          if(simCont.state.phase==='seasonComplete' && simCont.nextSeason) simCont.nextSeason();
+          if(simCont.state.phase==='gameOver') break;
+        }
+        continueScore += (gCont.reputation||0) + (gCont.completed||0) + ((gCont.gold||0)/10);
+      }catch(e){
+        // ignore
+      }
+    }
+    return (restScore / trials) > (continueScore / trials);
   }
   weightedPick(options){const total=options.reduce((s,o)=>s+o.weight,0);let r=Math.random()*total;return (options.find(o=>(r-=o.weight)<=0)||options[0])?.item||null;}
   hire(guild,c,free,cost=null,{sponsored=false}={}){
