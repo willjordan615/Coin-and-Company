@@ -1,13 +1,7 @@
 import fs from 'fs';
-import os from 'os';
 import { Game } from '../engine/game.js';
-import { initMontePool } from './monte-pool.js';
 
 const games = Number(process.argv[2] || 20);
-const numWorkers = Number(process.env.MONTE_WORKERS || Math.max(1, os.cpus().length - 1));
-// initialize worker pool for monte trials (headless only)
-let montePool = null;
-try{ montePool = initMontePool(numWorkers); }catch(e){ console.warn('Failed to init monte pool:',e); }
 
 const baseSeed = Number(process.argv[3] || 4242);
 const seasonLimit = Number(process.argv[4] || 80);
@@ -43,8 +37,6 @@ function loadGame() {
   game.render = () => {};
   game.bindDropSlots = () => {};
   game.openTraitChoice = () => {};
-  // monte instrumentation per-game
-  game._monteStats = { calls: 0, trials: 0, timeMs: 0, abortedTrials: 0 };
   game.data = {
     statuses: readJson('data/statuses.json'),
     recruits: readJson('data/recruits.json'),
@@ -54,37 +46,52 @@ function loadGame() {
     lastNames: readJson('data/last_names.json'),
     aiProfiles: readJson('data/ai_profiles.json')
   };
-  // allow overriding monte carlo trial counts via environment variable MONTE_TRIALS
-  const envTrials = Number(process.env.MONTE_TRIALS || 0);
-  if(envTrials > 0){
-    game.data.contractParts.settings = game.data.contractParts.settings || {};
-    game.data.contractParts.settings.monteCarlo = game.data.contractParts.settings.monteCarlo || {};
-    game.data.contractParts.settings.monteCarlo.enabled = true;
-    game.data.contractParts.settings.monteCarlo.recruitTrials = envTrials;
-    game.data.contractParts.settings.monteCarlo.placementTrials = envTrials;
-    game.data.contractParts.settings.monteCarlo.facilityTrials = envTrials;
-    game.data.contractParts.settings.monteCarlo.restTrials = envTrials;
-    // keep seasons conservative
-    game.data.contractParts.settings.monteCarlo.recruitSeasons = 1;
-    game.data.contractParts.settings.monteCarlo.placementSeasons = 1;
-    game.data.contractParts.settings.monteCarlo.facilitySeasons = 1;
-    game.data.contractParts.settings.monteCarlo.restSeasons = 1;
-  }
   game.data.contracts = game.expandContracts(readJson('data/contracts.json'), game.data.contractParts, game.data.characterParts);
   return game;
 }
 
-function allAiSeason(game) {
-  for (const guild of game.snakeGuildOrder()) game.aiTurn(guild);
+async function allAiSeason(game) {
+  for (const guild of game.snakeGuildOrder()) await game.aiTurn(guild);
   for (const guild of game.snakeGuildOrder()) game.resolveAIPlacements(guild);
+  game.resolveSeasonContracts();
   game.state.phase = 'seasonComplete';
 }
 
-function score(guild) {
-  return guild.reputation + guild.completed + guild.gold / 10;
+function forceHeadlessHumanPhase(game) {
+  game.state.activeGuildId = null;
+  game.state.phase = 'awaitHuman';
+  game.state.humanActionUsed = false;
 }
 
-function runGame(seed) {
+function nextHeadlessSeason(game) {
+  if (game.state.seasonIndex === 3) {
+    if (game.state.year === 20) {
+      game.endGame();
+      return;
+    }
+    game.state.year++;
+    game.state.seasonIndex = 0;
+    game.state.starterIndex = (game.state.starterIndex + 1) % 4;
+  } else {
+    game.state.seasonIndex++;
+  }
+  for (const guild of game.state.guilds) guild.hiredThisSeason = false;
+  if (game.state.seasonIndex === 0) game.startYear();
+  if (game.state.startedSeasons > 0) game.evolveWorld();
+  game.revealRosterTraits();
+  if (game.state.startedSeasons > 0 || !game.state.boardContracts.length) game.refreshContracts();
+  game.refreshTavernMarket(game.state.startedSeasons === 0);
+  game.state.startedSeasons++;
+  game.log(null, 'season', `Year ${game.state.year}, ${game.currentSeason()} begins.`);
+  forceHeadlessHumanPhase(game);
+}
+
+function score(guild) {
+  const goals = { gold: 2000, reputation: 500, completed: 60, resources: 50, connections: 50 };
+  return Object.entries(goals).reduce((sum, [stat, target]) => sum + ((guild[stat] || 0) / target) * 100, 0);
+}
+
+async function runGame(seed) {
   const previousRandom = Math.random;
   Math.random = seededRandom(seed);
   try {
@@ -108,8 +115,7 @@ function runGame(seed) {
       profileResults: {}
     };
 
-    const originalSuccess = game.succeedBoardContract.bind(game);
-    game.succeedBoardContract = (guild, contract, chance) => {
+    const recordSuccess = (guild, contract, chance) => {
       const profileId = guild.personality?.id || 'unknown';
       stats.successes++;
       stats.completedWork.push(contract.workSeasons || 1);
@@ -117,29 +123,35 @@ function runGame(seed) {
       increment(stats.completionsByRisk, contract.risk);
       stats.profileResults[profileId] = stats.profileResults[profileId] || { successes: 0, failures: 0 };
       stats.profileResults[profileId].successes++;
-      originalSuccess(guild, contract, chance);
     };
 
-    const originalFailure = game.failBoardContract.bind(game);
-    game.failBoardContract = (guild, contract, chance) => {
-      const profileId = guild.personality?.id || 'unknown';
-      stats.failures++;
-      stats.failureChances.push(chance);
-      increment(stats.failuresByRisk, contract.risk);
-      stats.profileResults[profileId] = stats.profileResults[profileId] || { successes: 0, failures: 0 };
-      stats.profileResults[profileId].failures++;
-      originalFailure(guild, contract, chance);
+    const originalPrimaryAward = game.awardPrimaryContract.bind(game);
+    game.awardPrimaryContract = (contract, guild, chance, verb) => {
+      recordSuccess(guild, contract, chance);
+      originalPrimaryAward(contract, guild, chance, verb);
+    };
+
+    const originalCooperativeAward = game.awardCooperativeContract.bind(game);
+    game.awardCooperativeContract = (contract, claimant, participants, chance) => {
+      recordSuccess(claimant, contract, chance);
+      originalCooperativeAward(contract, claimant, participants, chance);
     };
 
     game.newGame();
+    game.menuOpen = false;
     game.pickAiProfiles(4).forEach((profile, index) => { game.state.guilds[index].personality = profile; });
     while (game.state.phase === 'setup') {
       const guild = game.currentSetupGuild();
       if (!guild) break;
-      if (guild.human) game.draftFounder(game.chooseRecruit(guild, game.state.tavern)?.id || game.state.tavern[0].id);
-      else game.aiDraftFounder(guild);
+      if (guild.human) {
+        game.draftFounderForGuild(guild, game.chooseRecruit(guild, game.state.tavern) || game.state.tavern[0]);
+        game.advanceSetupDraft();
+      } else {
+        await game.aiDraftFounder(guild);
+      }
     }
     game.state.guilds.forEach(guild => { guild.human = false; });
+    forceHeadlessHumanPhase(game);
 
     while (game.state.phase !== 'gameOver' && stats.seasons < seasonLimit) {
       if (game.state.phase === 'awaitHuman') {
@@ -148,9 +160,9 @@ function runGame(seed) {
         stats.boardOpen.push(game.state.boardContracts.filter(c => c.offerSeasons > 0).length);
         stats.lockedWorkers.push(game.state.guilds.reduce((sum, guild) => sum + guild.roster.filter(c => c.placement?.type === 'contract').length, 0));
         stats.availableWorkers.push(game.state.guilds.reduce((sum, guild) => sum + game.availableWorkers(guild).length, 0));
-        allAiSeason(game);
+        await allAiSeason(game);
       } else if (game.state.phase === 'seasonComplete') {
-        game.nextSeason();
+        nextHeadlessSeason(game);
       } else {
         break;
       }
@@ -165,6 +177,8 @@ function runGame(seed) {
       gold: guild.gold,
       reputation: guild.reputation,
       completed: guild.completed,
+      resources: guild.resources,
+      connections: guild.connections,
       engineTraits: guild.roster.filter(c => c.alive).reduce((sum, c) => sum + game.visibleTraits(c).filter(t => game.data.characterParts.traitEffects?.[t]?.length).length, 0),
       roster: guild.roster.filter(c => c.alive).length,
       dead: guild.roster.filter(c => !c.alive).length,
@@ -176,15 +190,14 @@ function runGame(seed) {
     stats.winner = stats.finalGuilds[0].name;
     stats.topScore = stats.finalGuilds[0].score;
 
-    // surface monte stats collected during this run
-    stats.monte = game._monteStats || { calls:0, trials:0, timeMs:0, abortedTrials:0 };
     return stats;
   } finally {
     Math.random = previousRandom;
   }
 }
 
-const results = Array.from({ length: games }, (_, i) => runGame(baseSeed + i * 9973));
+const results = [];
+for (let i = 0; i < games; i++) results.push(await runGame(baseSeed + i * 9973));
 const allSuccessChances = results.flatMap(r => r.successChances);
 const allFailureChances = results.flatMap(r => r.failureChances);
 const allWork = results.flatMap(r => r.completedWork);
@@ -202,6 +215,8 @@ function profileBucket(id, label = id) {
     gold: [],
     reputation: [],
     completed: [],
+    resources: [],
+    connections: [],
     roster: [],
     dead: [],
     conditions: [],
@@ -219,7 +234,7 @@ for (const result of results) {
     const bucket = profileBucket(guild.profileId, guild.profile);
     bucket.appearances++;
     if (guild.rank === 1) bucket.wins++;
-    for (const key of ['rank', 'score', 'gold', 'reputation', 'completed', 'roster', 'dead', 'conditions', 'engineTraits']) bucket[key].push(guild[key]);
+    for (const key of ['rank', 'score', 'gold', 'reputation', 'completed', 'resources', 'connections', 'roster', 'dead', 'conditions', 'engineTraits']) bucket[key].push(guild[key]);
   }
   for (const [profileId, counts] of Object.entries(result.profileResults)) {
     const bucket = profileBucket(profileId);
@@ -240,6 +255,8 @@ const profiles = Object.values(profileStats)
     avgGold: average(profile.gold),
     avgReputation: average(profile.reputation),
     avgCompleted: average(profile.completed),
+    avgResources: average(profile.resources),
+    avgConnections: average(profile.connections),
     avgRoster: average(profile.roster),
     avgDead: average(profile.dead),
     avgConditions: average(profile.conditions),
@@ -276,8 +293,5 @@ const samples = results.slice(0, Math.min(3, games)).map(result => ({
   failures: result.failures,
   finalGuilds: result.finalGuilds
 }));
-
-// destroy worker pool if present
-if(montePool && typeof montePool.destroy === 'function') montePool.destroy();
 
 console.log(JSON.stringify({ summary, profiles, samples }, null, 2));

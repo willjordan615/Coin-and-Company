@@ -18,14 +18,18 @@ const aiProfiles = readJson('data/ai_profiles.json');
 let engine = fs.readFileSync(path.join(root, 'engine/game.js'), 'utf8');
 engine = engine.replace(/^export class Game/m, 'class Game');
 engine = engine.replace(
-  /async init\(\) \{[\s\S]*?\n  \}\n\n  newGame\(\)/,
-  `init() {\n    this.data = {...GUILD_DATA,contractParts:CONTRACT_PARTS,characterParts:CHARACTER_PARTS,firstNames:FIRST_NAMES,lastNames:LAST_NAMES,contracts:this.expandContracts(GUILD_DATA.contracts,CONTRACT_PARTS,CHARACTER_PARTS)};\n    this.newGame();\n  }\n\n  newGame()`
+  /async init\(\) \{[\s\S]*?\r?\n  \}\r?\n\r?\n  newGame[^{]*\{/,
+  `init() {\n    this.data = {...GUILD_DATA,contractParts:CONTRACT_PARTS,characterParts:CHARACTER_PARTS,firstNames:FIRST_NAMES,lastNames:LAST_NAMES,contracts:this.expandContracts(GUILD_DATA.contracts,CONTRACT_PARTS,CHARACTER_PARTS)};\n    this.newGame();\n  }\n\n  newGame(matchSetup=this.defaultMatchSetup()) {`
 );
 
 engine = engine.replace(
   `this.data = {...GUILD_DATA,contractParts:CONTRACT_PARTS,characterParts:CHARACTER_PARTS,firstNames:FIRST_NAMES,lastNames:LAST_NAMES,contracts:this.expandContracts(GUILD_DATA.contracts,CONTRACT_PARTS,CHARACTER_PARTS)};`,
   `this.data = {...GUILD_DATA,contractParts:CONTRACT_PARTS,characterParts:CHARACTER_PARTS,firstNames:FIRST_NAMES,lastNames:LAST_NAMES,aiProfiles:AI_PROFILES,contracts:this.expandContracts(GUILD_DATA.contracts,CONTRACT_PARTS,CHARACTER_PARTS)};`
 );
+
+if (/fetch\('\.\/data\//.test(engine) || /^async init\(\)/m.test(engine)) {
+  throw new Error('Failed to convert engine init() into standalone bundled data init().');
+}
 
 const bundle = `const GUILD_DATA = ${JSON.stringify(guildData, null, 2)};\n\nconst CONTRACT_PARTS = ${JSON.stringify(contractParts, null, 2)};\n\nconst FIRST_NAMES = ${JSON.stringify(firstNames, null, 2)};\n\nconst LAST_NAMES = ${JSON.stringify(lastNames, null, 2)};\n\nconst CHARACTER_PARTS = ${JSON.stringify(characterParts, null, 2)};\n\nconst AI_PROFILES = ${JSON.stringify(aiProfiles, null, 2)};\n\n${engine}\n\nconst game = new Game();\ngame.init();\ngame.bindUI();\ngame.render();\n`;
 

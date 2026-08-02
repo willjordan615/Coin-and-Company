@@ -1,6 +1,8 @@
 {
   "settings": {
-    "boardSize": 5,
+    "boardSize": 3,
+    "contractsPerExtraPlayer": 0,
+    "contractSharedSlots": 5,
     "keepVisibleFraction": 0.4,
     "beginnerBoardYears": 1,
     "beginnerMinChance": 50,
@@ -16,6 +18,13 @@
     "aiTurnDelayMs": 550,
     "guildResourceCap": 8,
     "guildConnectionCap": 5,
+    "victoryGoals": {
+      "gold": 2000,
+      "reputation": 500,
+      "completed": 60,
+      "resources": 50,
+      "connections": 50
+    },
     "minRewardGold": 6,
     "minRewardReputation": 1,
     "rewardGoldScale": 0.75,

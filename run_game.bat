@@ -1,42 +1,27 @@
 @echo off
-REM Run the game locally (Windows). Builds bundle if Node is available, serves files via Python, and opens browser.
-SETLOCAL
-REM Change to project folder so paths with spaces work (user requested)
-cd /d "C:\Users\wtsna\Desktop\Coin and Company\Coin and Company"
+REM Run the game locally (Windows). The Node server builds bundle.js, serves fresh files, and opens the browser.
+SETLOCAL EnableDelayedExpansion
+REM Change to this script's folder so paths with spaces work.
+cd /d "%~dp0"
 IF %ERRORLEVEL% NEQ 0 (
   echo Warning: failed to change to project directory. Continuing in current directory.
 )
 
-REM Optional: build with Node if available
+REM Node is required so the server can build the browser bundle before serving.
 where node >nul 2>&1
 IF %ERRORLEVEL%==0 (
-  echo Building bundle with Node...
-  node scripts\build-bundle.js || (
-    echo Build failed, continuing to serve existing bundle...
+  FOR /F %%P IN ('powershell -NoProfile -Command "$p=8000; while($true){$l=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,$p); try{$l.Start(); $l.Stop(); $p; break}catch{$p++}}"') DO SET GAME_PORT=%%P
+  echo Starting local Node server on port !GAME_PORT!. It will build bundle.js before serving.
+  start "Game Server" cmd /k "node scripts\serve-game.js !GAME_PORT!"
+  powershell -NoProfile -Command "$u='http://localhost:!GAME_PORT!/__build-info'; for($i=0;$i -lt 60;$i++){try{Invoke-WebRequest -UseBasicParsing $u | Out-Null; exit 0}catch{Start-Sleep -Milliseconds 250}}; exit 1"
+  IF !ERRORLEVEL! NEQ 0 (
+    echo Server did not become ready. Check the Game Server window for build errors.
+    exit /b 1
   )
+  start "" "http://localhost:!GAME_PORT!"
+  exit /b 0
 ) ELSE (
-  echo Node not found; skipping build.
+  echo Node not found. Please install Node.js so the game can build and serve the browser bundle.
 )
 
-REM Try Python's http.server first
-where python >nul 2>&1
-IF %ERRORLEVEL%==0 (
-  echo Starting Python HTTP server on port 8000 in a new window...
-  start "Game Server" cmd /c "python -m http.server 8000"
-  timeout /t 1 >nul
-  start "" "http://localhost:8000"
-  exit /b 0
-)
-
-REM Fallback: try npx http-server
-where npx >nul 2>&1
-IF %ERRORLEVEL%==0 (
-  echo Starting http-server on port 8000 in a new window...
-  start "Game Server" cmd /c "npx http-server -p 8000"
-  timeout /t 1 >nul
-  start "" "http://localhost:8000"
-  exit /b 0
-)
-
-echo No suitable server (python or npx) found. Please install Python 3 or http-server (npm package) and re-run.
 exit /b 1

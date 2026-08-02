@@ -37,11 +37,49 @@
       <div class="entry-actions" aria-label="Main menu">
         <button id="singlePlayerBtn" class="primary" type="button">Single Player</button>
         <button id="loadGameBtn" type="button">Load Game</button>
-        <button id="multiplayerBtn" type="button">Multiplayer</button>
+        <button id="multiplayerBtn" type="button">Game Setup</button>
         <button id="settingsBtn" type="button">Settings</button>
         <button id="glossaryBtn" type="button">Glossary</button>
       </div>
       <p id="entryNote" class="entry-note">Single player contest against three AI guilds.</p>
+    </div>
+
+    <div class="entry-panel closed" id="gameSetupPanel">
+      <div class="setup-head">
+        <h2>Game Setup</h2>
+        <button id="startCustomGameBtn" class="primary" type="button">Start Game</button>
+      </div>
+      <div class="setup-controls">
+        <label>
+          <span>Format</span>
+          <select id="setupModeSelect">
+            <option value="ffa">FFA</option>
+            <option value="teams">Teams</option>
+          </select>
+        </label>
+        <label>
+          <span>Players</span>
+          <select id="setupPlayerCountSelect">
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4" selected>4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+            <option value="7">7</option>
+            <option value="8">8</option>
+          </select>
+        </label>
+        <label>
+          <span>Contracts</span>
+          <select id="setupContractSelect">
+            <option value="0.75">Tight</option>
+            <option value="1" selected>Normal</option>
+            <option value="1.25">Open</option>
+          </select>
+        </label>
+      </div>
+      <div id="setupPlayerRows" class="setup-player-list"></div>
+      <p id="setupSummary" class="entry-note"></p>
     </div>
 
     <div class="entry-panel closed" id="settingsPanel">
@@ -79,6 +117,7 @@
 
   <main class="board-shell">
     <section class="world-ticker" id="worldGrid"></section>
+    <section class="ai-activity-strip" id="aiActivityStrip" aria-live="polite"></section>
 
     <section class="placement-board">
       <section class="panel roster-panel">
@@ -113,14 +152,19 @@
     <div id="guildGrid" class="guild-grid"></div>
   </aside>
 
+  <div id="aiThinking" class="ai-thinking closed" role="status" aria-live="polite">
+    <span class="ai-thinking-spinner" aria-hidden="true"></span>
+    <span class="ai-thinking-copy">AI thinking...</span>
+  </div>
   <button id="advanceBtn" class="primary season-button">Resolve Season</button>
 
   <section class="detail-overlay closed" id="characterPanel" aria-modal="true" aria-labelledby="characterPanelTitle">
     <div class="detail-modal">
       <div class="tavern-header">
         <div>
-          <p class="modal-eyebrow">Mercenary</p>
+          <p id="characterPanelEyebrow" class="modal-eyebrow">Mercenary</p>
           <h2 id="characterPanelTitle">Character Sheet</h2>
+          <p id="characterPanelSubtitle" class="modal-subtitle"></p>
         </div>
         <span id="characterPanelClose" class="text-action tavern-close" role="button" tabindex="0">Close</span>
       </div>
