@@ -38,9 +38,11 @@ export class Game {
       tavern:[],
       contractDeck:this.shuffle(this.data.contracts.map(c=>structuredClone(c))),
       boardContracts:[], log:[], nextContractInstance:1, nextCharacterInstance:1, tavernHasNew:true, tavernOpen:true,
-      world:this.makeWorld(matchSetup.worldKey), match:{mode:matchSetup.mode||'ffa',playerCount:playerSetup.length,contractAvailability:matchSetup.contractAvailability||1,worldKey:matchSetup.worldKey||'random'}, startedSeasons:0, pendingTraitChoice:null, pendingContractResponses:[], resolvingContractResponses:false, setupDraftIndex:0, setupDraftPending:false, openingSplashUntil:this.browserDelayUntil(5000), activeGuildId:null, focusContractId:null, aiActivity:[],
+      world:this.makeWorld(matchSetup.worldKey), match:{mode:matchSetup.mode||'ffa',playerCount:playerSetup.length,contractAvailability:matchSetup.contractAvailability||1,worldKey:matchSetup.worldKey||'random'}, startedSeasons:0, pendingTraitChoice:null, pendingContractResponses:[], pendingClaimForceResponses:[], resolvingContractResponses:false, setupDraftIndex:0, setupDraftPending:false, openingSplashUntil:this.browserDelayUntil(5000), activeGuildId:null, focusContractId:null, focusFacilityKey:null, aiActivity:[],
       guilds:playerSetup.map((player,index)=>{
-        const guild=this.makeGuild(player.id,player.name,player.control,player.control==='local'?null:this.aiPersonalityForPlayer(player,rivals[aiIndex++]));
+        const personality=player.control==='local'?null:this.aiPersonalityForPlayer(player,rivals[aiIndex++]);
+        const name=player.name||personality?.defaultName||personality?.label||player.fallbackName||`Guild ${index+1}`;
+        const guild=this.makeGuild(player.id,name,player.control,personality);
         guild.teamId=player.teamId||player.id;
         guild.factionId=player.factionId||player.id;
         return guild;
@@ -55,23 +57,23 @@ export class Game {
   defaultMatchSetup(){
     return this.matchSetup('ffa',[
       {control:'local'},
-      {control:'ai',difficulty:'normal'},
-      {control:'ai',difficulty:'normal'},
-      {control:'ai',difficulty:'normal'}
+      {control:'ai',difficulty:'hard'},
+      {control:'ai',difficulty:'hard'},
+      {control:'ai',difficulty:'hard'}
     ]);
   }
   hotseatMatchSetup(){
     return this.matchSetup('ffa',[
       {control:'local'},
       {control:'local'},
-      {control:'ai',difficulty:'normal'},
-      {control:'ai',difficulty:'normal'}
+      {control:'ai',difficulty:'hard'},
+      {control:'ai',difficulty:'hard'}
     ]);
   }
   duelMatchSetup(){
     return this.matchSetup('ffa',[
       {control:'local'},
-      {control:'ai',difficulty:'normal',personalityId:'fighters'}
+      {control:'ai',difficulty:'hard',personalityId:'fighters'}
     ]);
   }
   fourPlayerFfaMatchSetup(){
@@ -86,12 +88,12 @@ export class Game {
     return this.matchSetup('teams',[
       {control:'local',teamId:'team-1'},
       {control:'local',teamId:'team-1'},
-      {control:'ai',teamId:'team-2',difficulty:'normal',personalityId:'builders'},
-      {control:'ai',teamId:'team-2',difficulty:'normal',personalityId:'fighters'},
-      {control:'ai',teamId:'team-3',difficulty:'normal',personalityId:'civic'},
-      {control:'ai',teamId:'team-3',difficulty:'normal',personalityId:'operators'},
-      {control:'ai',teamId:'team-4',difficulty:'normal',personalityId:'merchants'},
-      {control:'ai',teamId:'team-4',difficulty:'normal',personalityId:'explorers'}
+      {control:'ai',teamId:'team-2',difficulty:'hard',personalityId:'builders'},
+      {control:'ai',teamId:'team-2',difficulty:'hard',personalityId:'fighters'},
+      {control:'ai',teamId:'team-3',difficulty:'hard',personalityId:'civic'},
+      {control:'ai',teamId:'team-3',difficulty:'hard',personalityId:'operators'},
+      {control:'ai',teamId:'team-4',difficulty:'hard',personalityId:'merchants'},
+      {control:'ai',teamId:'team-4',difficulty:'hard',personalityId:'explorers'}
     ]);
   }
   matchSetup(mode='ffa',players=[],options={}){
@@ -105,11 +107,12 @@ export class Game {
       const id=(player.id||fallbackName).toLowerCase().replaceAll(' ','-');
       return {
         id,
-        name:index===0?this.cleanGuildName(this.pendingGuildName):player.name||fallbackName,
+        name:index===0&&player.control==='local'?this.cleanGuildName(this.pendingGuildName):player.name||null,
+        fallbackName,
         control:player.control==='local'?'local':'ai',
         teamId:mode==='teams'?(player.teamId||`team-${index+1}`):id,
         factionId:player.factionId||id,
-        difficulty:player.difficulty||'normal',
+        difficulty:player.difficulty||'hard',
         personalityId:player.personalityId||player.aiArchetype||null
       };
     });
@@ -258,7 +261,7 @@ export class Game {
     const isLocal=control===true||control==='local';
     return {
       id,name,control:isLocal?'local':'ai',human:isLocal,personality,teamId:id,factionId:id,
-      gold:0,reputation:0,completed:0,roster:[],resources:2,connections:1,facilityReadiness:{},
+      gold:0,reputation:0,completed:0,roster:[],resources:2,connections:1,facilityReadiness:{},patronFavor:{},
       poolWins:{}
     };
   }
@@ -274,9 +277,9 @@ export class Game {
   }
   aiDifficultyPackages(){
     return {
-      easy:{label:'Easy',adjust:{riskMultiplier:0.92,minChanceDelta:8,facilityChanceDelta:-0.06,restChanceDelta:0.08,workPenaltyDelta:0.45}},
-      normal:{label:'Normal',patch:{}},
-      hard:{label:'Hard',adjust:{riskMultiplier:1.08,minChanceDelta:-4,facilityChanceDelta:0.06,restChanceDelta:-0.06,workPenaltyDelta:-0.35}}
+      easy:{label:'Easy',adjust:{riskMultiplier:0.92,minChanceDelta:8,facilityChanceDelta:-0.06,restChanceDelta:0.08,workPenaltyDelta:0.45,decisionNoise:0.28,planningDelayYears:5,planningScale:0.62}},
+      normal:{label:'Normal',adjust:{decisionNoise:0.14,planningDelayYears:2,planningScale:0.82}},
+      hard:{label:'Hard',adjust:{riskMultiplier:1.08,minChanceDelta:-4,facilityChanceDelta:0.06,restChanceDelta:-0.06,workPenaltyDelta:-0.35,decisionNoise:0,planningDelayYears:0,planningScale:1}}
     };
   }
   aiPersonalityForPlayer(player,fallbackProfile=null){
@@ -298,13 +301,24 @@ export class Game {
     if(adjust.facilityChanceDelta&&typeof base.facilityChance==='number')base.facilityChance+=adjust.facilityChanceDelta;
     if(adjust.restChanceDelta&&typeof base.restChance==='number')base.restChance+=adjust.restChanceDelta;
     if(adjust.workPenaltyDelta&&typeof base.workPenalty==='number')base.workPenalty+=adjust.workPenaltyDelta;
-    base.difficulty=player.difficulty||'normal';
+    base.decisionNoise=adjust.decisionNoise??0;
+    base.planningDelayYears=adjust.planningDelayYears??0;
+    base.planningScale=adjust.planningScale??1;
+    base.difficulty=player.difficulty||'hard';
     base.personalitySelection=player.personalityId||'random';
     base.label=`${difficulty.label} ${base.label}`;
     return base;
   }
   cleanGuildName(name){return String(name||'').trim().slice(0,28)||'Amber Company';}
   aiProfileValue(guild,key,fallback){return guild.personality?.[key]??fallback;}
+  aiDecisionValue(guild,value){
+    const noise=this.aiProfileValue(guild,'decisionNoise',0);
+    if(!noise)return value;
+    return value*(1-Math.random()*noise);
+  }
+  aiPickBestOption(guild,options){
+    return options.map(option=>({...option,rankValue:this.aiDecisionValue(guild,option.value)})).sort((a,b)=>b.rankValue-a.rankValue)[0]||null;
+  }
   makeCharacter(base,professionOverride=null) { const profession=professionOverride||this.pickProfession();const traits=this.pickTraits(profession);const allTraits=[profession.name,...traits].slice(0,this.maxTraits());const variance=this.data.characterParts.settings;const character={...structuredClone(base),templateId:base.id,id:`${base.id}-${this.state.nextCharacterInstance++}`,archetype:profession.name,status:profession.status,traits:allTraits,revealedTraits:[profession.name],revealAfterSeason:false,conditions:[],resources:this.clamp(profession.resources+this.randomInt(...variance.resourceVariance),0,5),connections:this.clamp(profession.connections+this.randomInt(...variance.connectionVariance),0,5),history:[],placement:null,alive:true,refusesGuildIds:[]};character.name=this.generateCharacterName(base);return character; }
   pickProfession(){
     const weights=this.data.characterParts.settings.professionStatusWeights||{};
@@ -427,6 +441,12 @@ export class Game {
       if(release){this.releaseMerc(release.dataset.characterId,release.dataset.releaseMerc);return;}
       const response=evt.target.closest?.('[data-contract-response]');
       if(response){this.resolveContractResponse(response.dataset.responseId,response.dataset.contractResponse);return;}
+      const force=evt.target.closest?.('[data-claim-force-response]');
+      if(force){this.resolveClaimForceResponse(force.dataset.responseId,force.dataset.claimForceResponse);return;}
+      const responseMerc=evt.target.closest?.('[data-contract-response-merc]');
+      if(responseMerc){this.openContractResponseMerc(responseMerc.dataset.responseId,responseMerc.dataset.contractResponseMerc);return;}
+      const responseBack=evt.target.closest?.('[data-open-contract-response]');
+      if(responseBack){this.openContractResponse(responseBack.dataset.openContractResponse);return;}
       const term=evt.target.closest?.('[data-glossary-term]');
       if(term){evt.preventDefault();evt.stopPropagation();this.openGlossaryTerm(term.dataset.glossaryTerm,term.dataset.glossaryWeight);return;}
       const character=evt.target.closest?.('[data-inspect-character]');
@@ -438,6 +458,12 @@ export class Game {
       if(release){evt.preventDefault();this.releaseMerc(release.dataset.characterId,release.dataset.releaseMerc);return;}
       const response=evt.target.closest?.('[data-contract-response]');
       if(response){evt.preventDefault();this.resolveContractResponse(response.dataset.responseId,response.dataset.contractResponse);return;}
+      const force=evt.target.closest?.('[data-claim-force-response]');
+      if(force){evt.preventDefault();this.resolveClaimForceResponse(force.dataset.responseId,force.dataset.claimForceResponse);return;}
+      const responseMerc=evt.target.closest?.('[data-contract-response-merc]');
+      if(responseMerc){evt.preventDefault();this.openContractResponseMerc(responseMerc.dataset.responseId,responseMerc.dataset.contractResponseMerc);return;}
+      const responseBack=evt.target.closest?.('[data-open-contract-response]');
+      if(responseBack){evt.preventDefault();this.openContractResponse(responseBack.dataset.openContractResponse);return;}
       const term=evt.target.closest?.('[data-glossary-term]');
       if(term){evt.preventDefault();this.openGlossaryTerm(term.dataset.glossaryTerm,term.dataset.glossaryWeight);return;}
       const character=evt.target.closest?.('[data-inspect-character]');
@@ -515,7 +541,7 @@ export class Game {
         name:old.name,
         control:old.control||defaultControl,
         teamId:mode==='teams'?(old.teamId||`team-${Math.min(index+1,4)}`):`player-${index+1}`,
-        difficulty:old.difficulty||'normal',
+        difficulty:old.difficulty||'hard',
         personalityId:old.personalityId||old.aiArchetype||'random'
       };
     });
@@ -535,7 +561,7 @@ export class Game {
     if(!player)return;
     const key=field.dataset.setupField;
     player[key]=field.value;
-    if(key==='control'&&field.value==='local')player.difficulty=player.difficulty||'normal';
+    if(key==='control'&&field.value==='local')player.difficulty=player.difficulty||'hard';
     if(this.pendingSetup.mode==='ffa')player.teamId=`player-${index+1}`;
     if(key==='name'){
       this.renderSetupSummary();
@@ -563,10 +589,12 @@ export class Game {
   }
   setupPlayerRowHtml(player,index,setup){
     const isCpu=player.control!=='local';
-    const name=player.name||(['Amber Company','White Raven','Iron Oath','Green Lantern','Blue Banner','Red Sash','Silver Hand','Black Tower'][index]||`Guild ${index+1}`);
     const teamOptions=Array.from({length:Math.min(4,setup.players.length)},(_,i)=>`team-${i+1}`);
     const profiles=this.data.aiProfiles||[];
     const selectedProfile=player.personalityId||player.aiArchetype||'random';
+    const profile=profiles.find(candidate=>candidate.id===selectedProfile);
+    const fallbackName=['Amber Company','White Raven','Iron Oath','Green Lantern','Blue Banner','Red Sash','Silver Hand','Black Tower'][index]||`Guild ${index+1}`;
+    const name=player.name||(isCpu&&profile?.defaultName?profile.defaultName:fallbackName);
     return `<article class="setup-player-row">
       <strong>P${index+1}</strong>
       <input data-setup-field="name" data-player-index="${index}" value="${this.escapeAttr(name)}" maxlength="28" aria-label="Player ${index+1} guild name">
@@ -672,20 +700,25 @@ export class Game {
       this.log(null,'game','Loaded during an AI turn; returned control to the player.');
     }
     if(this.state.focusContractId&&!this.state.boardContracts?.some(c=>c.instanceId===this.state.focusContractId))this.state.focusContractId=null;
-    for(const guild of this.state.guilds||[])guild.facilityReadiness=guild.facilityReadiness||{};
+    if(this.state.focusFacilityKey&&!this.facilityDef(this.state.focusFacilityKey))this.state.focusFacilityKey=null;
+    for(const guild of this.state.guilds||[]){
+      guild.facilityReadiness=guild.facilityReadiness||{};
+      guild.patronFavor=guild.patronFavor||{};
+    }
     this.state.aiActivity=this.state.aiActivity||[];
     this.state.localTurnIndex=this.state.localTurnIndex||0;
     this.state.openingSplashUntil=0;
     this.state.pendingContractResponses=this.state.pendingContractResponses||[];
+    this.state.pendingClaimForceResponses=this.state.pendingClaimForceResponses||[];
     this.state.resolvingContractResponses=false;
   }
   renderGlossary(){
     if(!this.ui.glossaryBody)return;
     const settings=this.data.contractParts.settings;
     const goals=this.victoryGoals();
-    const facilities=this.data.contractParts.facilities.map(f=>`<li><strong>${this.escapeHtml(f.label)}</strong><span>Train traits through worker placement</span></li>`).join('');
+    const facilities=this.data.contractParts.facilities.map(f=>`<li><strong>${this.escapeHtml(f.label)}</strong><span>${this.escapeHtml(this.facilityPatronPathSummary(f))}</span></li>`).join('');
     const pools=this.data.contractParts.world.pools.map(p=>`<li><strong>${this.escapeHtml(p.key)}</strong><span>${this.escapeHtml((p.types||[]).slice(0,4).join(', '))}</span></li>`).join('');
-    this.ui.glossaryBody.innerHTML=`<section><h3>Core Rules</h3><p><strong>Victory lanes</strong>: win early by reaching Gold ${goals.gold}, Rep ${goals.reputation}, Done ${goals.completed}, Res ${goals.resources}, or Conn ${goals.connections}.</p><p><strong>Contracts</strong> have ${this.contractSharedSlotLimit()} shared mercenary slots. The first guild to place claims the work; later guilds cooperate by dropping on open slots or compete by dropping on occupied rival slots. Multi-season contracts resolve at season end and keep workers committed until finished.</p><p><strong>Readiness</strong> is explicit setup. Focus a contract, then send fitting workers to Scout Lodge for Scouted +5% per season, max +20%, or Archives for one-time Planned +10%. Facilities can also gain Ready marks; fitting workers exploit Ready into scoreboard progress.</p><p><strong>Traits</strong> are the engine. Profession tags give about ${settings.requirementWeights[0]}% when demanded; support tags give about ${settings.supportWeights[0]}%.</p><p><strong>Hiring</strong> is limited to one paid tavern recruit per guild each season. Founders ignore reputation gates. Professionals require 10 reputation, gentry require 25, and nobles require 50.</p><p><strong>Resources</strong> are guild capacity. Contracts check them for odds, but do not spend them. <strong>Connections</strong> give +2% odds each on every contract.</p></section><section><h3>Facilities</h3><ul>${facilities}</ul></section><section><h3>Contract Pools</h3><ul>${pools}</ul></section>`;
+    this.ui.glossaryBody.innerHTML=`<section><h3>Core Rules</h3><p><strong>Victory lanes</strong>: win early by reaching Gold ${goals.gold}, Rep ${goals.reputation}, Done ${goals.completed}, Res ${goals.resources}, or Conn ${goals.connections}.</p><p><strong>Contracts</strong> have ${this.contractSharedSlotLimit()} shared mercenary slots. The first guild to place claims the work; later guilds cooperate by dropping on open slots or compete by dropping on occupied rival slots. Cooperative claims use shared odds. Reward shares scale by guild count: ${Math.round((settings.cooperativeClaimantDuelShare??0.7)*100)}/30 for two guilds, about 50/25/25 for three, and about 33/22/22/22 for four. Multi-season contracts resolve at season end and keep workers committed until finished.</p><p><strong>Readiness</strong> is explicit setup. Focus a contract, then send fitting workers to Scout Lodge for Scouted +5% per season, max +20%, or Archives for one-time Planned +10%. Focus a facility, then send fitting workers to Archives for a one-use Planned +10% training roll there. No focus means Archives planning creates no Planned bonus.</p><p><strong>Traits</strong> are the engine. Profession tags give about ${settings.requirementWeights[0]}% when demanded; support tags give about ${settings.supportWeights[0]}%.</p><p><strong>Hiring</strong> is limited to one paid tavern recruit per guild each season. Founders ignore reputation gates. Professionals require 10 reputation, gentry require 25, and nobles require 50.</p><p><strong>Resources</strong> are guild capacity. Contracts check them for odds, but do not spend them. <strong>Connections</strong> give +2% odds each on every contract.</p></section><section><h3>Facilities</h3><ul>${facilities}</ul></section><section><h3>Contract Pools</h3><ul>${pools}</ul></section>`;
   }
 
   bindGlossaryClicks(){
@@ -706,7 +739,7 @@ export class Game {
   }
 
   closeTavern(){if(this.state.phase==='setup')return;this.state.tavernOpen=false;this.render();}
-  closeCharacterPanel(){if(this.currentContractResponse())return;this.ui.characterPanel.classList.add('closed');}
+  closeCharacterPanel(){if(this.currentContractResponse()||this.currentClaimForceResponse())return;this.ui.characterPanel.classList.add('closed');}
   setDetailHeader(eyebrow,title,subtitle=''){
     this.ui.characterPanelEyebrow.textContent=eyebrow;
     this.ui.characterPanelTitle.textContent=title;
@@ -726,9 +759,11 @@ export class Game {
     const condition=this.conditionDef(term);
     const status=this.data.statuses.find(s=>s.name===term||s.id===term);
     const facility=this.facilityDef(term)||this.data.contractParts.facilities.find(f=>f.label===term);
+    const patron=this.patronByTerm(term);
     const twist=this.contractTwistByTerm(term);
     const risk=this.contractRiskByTerm(term);
     if(facility)return this.facilityGlossaryEntry(facility);
+    if(patron)return this.patronGlossaryEntry(patron);
     if(twist)return this.twistGlossaryEntry(twist);
     if(risk)return this.riskGlossaryEntry(risk);
     if(condition)return this.conditionGlossaryEntry(condition);
@@ -742,6 +777,10 @@ export class Game {
   contractRiskByTerm(term){
     const normalized=String(term||'').toLowerCase();
     return ['low','moderate','dangerous','deadly','lethal'].includes(normalized)?normalized:null;
+  }
+  patronByTerm(term){
+    const normalized=String(term||'').toLowerCase();
+    return (this.data.contractParts.patrons||[]).find(patron=>patron.key===normalized||patron.name?.toLowerCase()===normalized||patron.path?.toLowerCase()===normalized);
   }
   twistGlossaryEntry(twist){
     const label=twist.label?.trim()||'Routine';
@@ -767,6 +806,25 @@ export class Game {
     };
     const matching=(this.data.contractParts.twists||[]).filter(t=>t.risk===risk).map(t=>t.label?.trim()||'Routine');
     return {eyebrow:'Risk',title:risk[0].toUpperCase()+risk.slice(1),subtitle:'Contract difficulty band',bullets:[text[risk]||'Risk controls the failure table and reward scale.',matching.length?`Common prefixes: ${this.formatList(matching)}.`:'No prefix currently uses this risk band.','Higher risk generally means stronger rewards and harsher failures.'],rules:[]};
+  }
+  patronGlossaryEntry(patron){
+    const facility=this.facilityDef(patron.facility);
+    const thresholds=this.patronFavorThresholds();
+    const local=this.activeLocalGuild?.();
+    const favor=local?this.patronFavor(local,patron.key):0;
+    const bullets=[
+      `Support trait: ${patron.trait}.`,
+      `Facility path: ${facility?.label||patron.facility} - ${patron.path}.`,
+      `Victory lane: ${this.victoryLaneLabel(patron.lane)}.`,
+      `Current favor: ${favor}.`,
+      `Contract modifier: ${patron.difficulty>=0?'+':''}${patron.difficulty}% difficulty, ${patron.gold>=0?'+':''}${patron.gold} gold, ${patron.rep>=0?'+':''}${patron.rep} reputation.`,
+      `Favor ${thresholds.ready}: grants annual Ready marks to ${facility?.label||patron.facility}.`,
+      `Favor ${thresholds.training}: improves training rolls.`,
+      this.patronProductionUnlockText(patron),
+      `Favor ${thresholds.slot}: adds one facility slot.`,
+      `Favor ${thresholds.ally}: becomes an ally contact and grants a Connection.`
+    ];
+    return {eyebrow:'Patron',title:patron.name,subtitle:patron.path,bullets,rules:[]};
   }
   traitGlossaryEntry(term,profession=null,weight=null){
     const affinity=this.data.characterParts.tagAffinities?.[term];
@@ -807,6 +865,8 @@ export class Game {
       `Training roll: ${facility.trainChance}% before worker and facility support.`,
       `Trains: ${this.formatList(facility.traits||[])}.`,
       facility.rareTraits?.length?`Rare training pool: ${this.formatList(facility.rareTraits)} (${Math.round((facility.rareChance??0.12)*100)}% pool chance).`:'No rare training pool.',
+      `Patron paths: ${this.facilityPatronPathSummary(facility)}.`,
+      `Favor thresholds: 2 annual Ready, 4 improved training and Ready production, 6 one extra slot, 8 patron ally contact. Resource and Connection patron production also needs concurrent supporting facility work unless the patron is already an ally.`,
       ...setup,
       ...production,
       ...support
@@ -816,7 +876,7 @@ export class Game {
   facilityReadinessRuleLines(facility){
     const lines=[];
     if(facility.key==='scout')lines.push('Contract readiness: Scout-like workers here add Scouted marks to the focused contract.');
-    if(facility.key==='archives')lines.push('Contract readiness: Scholar-like workers here add a Planned mark to the focused contract.');
+    if(facility.key==='archives')lines.push('Planning: Scholar-like workers here add Planned +10% only to the focused contract, or one-use Planned +10% training only to the focused facility. No focused target means no Planned bonus.');
     for(const rule of this.facilitySetupRules().filter(rule=>rule.facility===facility.key)){
       lines.push(`${this.formatList(rule.tags)} here readies the least-ready of ${this.formatList(rule.targets.map(key=>this.facilityDef(key)?.label||key))}.`);
     }
@@ -833,6 +893,10 @@ export class Game {
   facilityEffectGlossaryLines(facility){
     const rules=Object.entries(this.data.characterParts.traitEffects||{}).flatMap(([trait,effects])=>effects.filter(effect=>(effect.facilities||[]).includes(facility.key)||(effect.targetFacilities||[]).includes(facility.key)).map(effect=>`${trait}: ${this.effectRuleText(effect)}`));
     return rules.length?[`Trait effects touching this facility: ${rules.slice(0,4).join(' | ')}${rules.length>4?' | ...':''}`]:[];
+  }
+  facilityPatronPathSummary(facility){
+    const paths=this.facilityPatrons(facility.key).map(patron=>`${patron.name}: ${patron.path} (${this.victoryLaneLabel(patron.lane)})`);
+    return paths.length?paths.join(' | '):'No patron path assigned.';
   }
   termLink(term,className=''){
     return `<button class="glossary-term ${className}" type="button" data-glossary-term="${this.escapeAttr(term)}">${this.escapeHtml(term)}</button>`;
@@ -863,13 +927,27 @@ export class Game {
     this.ui.characterPanelBody.innerHTML=this.contractInspectionHtml(contract,guild);
     this.ui.characterPanel.classList.remove('closed');
   }
-  currentContractResponse(){
-    const response=(this.state.pendingContractResponses||[])[0];
+  contractResponseById(responseId){
+    const response=(this.state.pendingContractResponses||[]).find(row=>row.id===responseId);
     if(!response)return null;
     const contract=this.state.boardContracts.find(c=>c.instanceId===response.contractId);
     const claimant=this.state.guilds.find(g=>g.id===response.claimantId);
     const intruder=this.state.guilds.find(g=>g.id===response.intruderId);
     return contract&&claimant&&intruder?{...response,contract,claimant,intruder}:null;
+  }
+  currentContractResponse(){
+    return this.contractResponseById((this.state.pendingContractResponses||[])[0]?.id);
+  }
+  claimForceResponseById(responseId){
+    const response=(this.state.pendingClaimForceResponses||[]).find(row=>row.id===responseId);
+    if(!response)return null;
+    const contract=this.state.boardContracts.find(c=>c.instanceId===response.contractId);
+    const claimant=this.state.guilds.find(g=>g.id===response.claimantId);
+    const intruder=this.state.guilds.find(g=>g.id===response.intruderId);
+    return contract&&claimant&&intruder?{...response,contract,claimant,intruder}:null;
+  }
+  currentClaimForceResponse(){
+    return this.claimForceResponseById((this.state.pendingClaimForceResponses||[])[0]?.id);
   }
   openNextContractResponse(){
     let response=this.currentContractResponse();
@@ -886,11 +964,76 @@ export class Game {
       this.resolveContractResponse(response.id,'allow',{continueSeason:false});
       return this.openNextContractResponse();
     }
-    const team=this.placedTeam(response.intruder,response.contract).map(worker=>worker.name).join(', ')||'a rival team';
+    this.openContractResponse(response.id);
+    return true;
+  }
+  openNextClaimForceResponse(){
+    let response=this.currentClaimForceResponse();
+    while(!response&&(this.state.pendingClaimForceResponses||[]).length){
+      this.state.pendingClaimForceResponses.shift();
+      response=this.currentClaimForceResponse();
+    }
+    if(!response)return false;
+    if(this.isAiGuild(response.intruder)){
+      this.resolveClaimForceResponse(response.id,this.aiClaimForceDecision(response.claimant,response.intruder,response.contract),{continueSeason:false});
+      return this.openNextClaimForceResponse();
+    }
+    if(typeof document==='undefined'||!this.ui.characterPanel){
+      this.resolveClaimForceResponse(response.id,'force',{continueSeason:false});
+      return this.openNextClaimForceResponse();
+    }
+    this.openClaimForceResponse(response.id);
+    return true;
+  }
+  openContractResponse(responseId){
+    const response=this.contractResponseById(responseId);
+    if(!response||!this.ui.characterPanel)return false;
     this.setDetailHeader('Claim Response',response.contract.title,response.intruder.name);
-    this.ui.characterPanelBody.innerHTML=`<article class="game-card contract-response-card"><p class="history">${this.escapeHtml(response.intruder.name)} has moved onto ${this.escapeHtml(response.claimant.name)}'s claimed contract with ${this.escapeHtml(team)}.</p><p class="history">Allowing cooperation keeps a shared project chance and weighted payout. Contesting turns their placement into a race for primary credit.</p><div class="trait-choice-grid"><div class="trait-choice" role="button" tabindex="0" data-response-id="${this.escapeAttr(response.id)}" data-contract-response="allow">Allow cooperation</div><div class="trait-choice danger-choice" role="button" tabindex="0" data-response-id="${this.escapeAttr(response.id)}" data-contract-response="contest">Contest the claim</div></div></article>`;
+    this.ui.characterPanelBody.innerHTML=this.contractResponseHtml(response);
     this.ui.characterPanel.classList.remove('closed');
     return true;
+  }
+  contractResponseHtml(response){
+    const team=this.placedTeam(response.intruder,response.contract);
+    const teamText=team.map(worker=>worker.name).join(', ')||'a rival team';
+    const projected=[...new Set([...this.contractParticipantGuilds(response.contract),response.claimant,response.intruder])];
+    const claimantShare=Math.round(this.cooperativeRewardShareForGuild(response.contract,response.claimant,response.claimant,projected)*100);
+    const mercs=team.length?`<div class="response-merc-list">${team.map(worker=>`<button class="response-merc-link" type="button" data-response-id="${this.escapeAttr(response.id)}" data-contract-response-merc="${this.escapeAttr(worker.id)}"><strong>${this.escapeHtml(worker.name)}</strong><span>${this.escapeHtml(worker.archetype)} - ${this.escapeHtml(this.traitPreviewText(worker))}</span></button>`).join('')}</div>`:'<p class="empty">No collaborator is currently assigned.</p>';
+    return `<article class="game-card contract-response-card"><p class="history">${this.escapeHtml(response.intruder.name)} has moved onto ${this.escapeHtml(response.claimant.name)}'s claimed contract with ${this.escapeHtml(teamText)}.</p><section class="response-collaborators"><h4>Offered collaborator</h4>${mercs}</section><p class="history">Allowing cooperation keeps shared project odds. With the current guild count, ${this.escapeHtml(response.claimant.name)} expects about ${claimantShare}% of the reward. Contesting turns their placement into a race for primary credit.</p>${this.contractResponseActionsHtml(response.id)}</article>`;
+  }
+  contractResponseActionsHtml(responseId){
+    return `<div class="trait-choice-grid"><div class="trait-choice" role="button" tabindex="0" data-response-id="${this.escapeAttr(responseId)}" data-contract-response="allow">Allow cooperation</div><div class="trait-choice danger-choice" role="button" tabindex="0" data-response-id="${this.escapeAttr(responseId)}" data-contract-response="contest">Reject cooperation</div></div>`;
+  }
+  openClaimForceResponse(responseId){
+    const response=this.claimForceResponseById(responseId);
+    if(!response||!this.ui.characterPanel)return false;
+    this.setDetailHeader('Claim Rejected',response.contract.title,response.claimant.name);
+    const team=this.placedTeam(response.intruder,response.contract);
+    const cost=this.competitionReputationCost(response.intruder,response.contract,response.claimant,team);
+    const names=team.map(worker=>worker.name).join(', ')||'your offered team';
+    this.ui.characterPanelBody.innerHTML=`<article class="game-card contract-response-card"><p class="history">${this.escapeHtml(response.claimant.name)} rejected ${this.escapeHtml(response.intruder.name)}'s cooperation offer on "${this.escapeHtml(response.contract.title)}".</p><p class="history">Force the claim to turn ${this.escapeHtml(names)} into competitors for primary credit${cost?` at ${cost} reputation cost`:''}, or withdraw them from the contract.</p><div class="trait-choice-grid"><div class="trait-choice danger-choice" role="button" tabindex="0" data-response-id="${this.escapeAttr(response.id)}" data-claim-force-response="force">Force the claim</div><div class="trait-choice keep" role="button" tabindex="0" data-response-id="${this.escapeAttr(response.id)}" data-claim-force-response="withdraw">Withdraw offer</div></div></article>`;
+    this.ui.characterPanel.classList.remove('closed');
+    return true;
+  }
+  openContractResponseMerc(responseId,characterId){
+    const response=this.contractResponseById(responseId);
+    if(!response||!this.ui.characterPanel)return false;
+    const found=this.findCharacter(characterId);
+    if(!found||found.guild.id!==response.intruder.id||found.character.placement?.id!==response.contract.instanceId)return false;
+    this.setDetailHeader('Collaborator Offer',found.character.name,response.intruder.name);
+    this.ui.characterPanelBody.innerHTML=`${this.characterCard(found.character,{showHistory:true,showAllTraits:true,guild:found.guild,allowDismissal:false})}<article class="game-card contract-response-card"><button class="trait-choice keep response-back" type="button" data-open-contract-response="${this.escapeAttr(response.id)}">Back to claim response</button>${this.contractResponseActionsHtml(response.id)}</article>`;
+    this.ui.characterPanel.classList.remove('closed');
+    return true;
+  }
+  aiClaimForceDecision(claimant,intruder,contract){
+    const team=this.placedTeam(intruder,contract);
+    const cost=this.competitionReputationCost(intruder,contract,claimant,team);
+    if(!team.length||intruder.reputation<cost)return 'withdraw';
+    const chance=this.successChanceForTeam(intruder,contract,team);
+    const mode=this.aiStrategicMode(intruder);
+    const contestValue=this.aiContractValue(intruder,contract,chance,team,team.length)+this.contestTraitScore(intruder,contract)+(mode.behind?12:0)+(mode.desperate?18:0)-cost*8;
+    const withdrawValue=(mode.rebuilding?10:0)+(chance<this.aiFallbackChance(intruder)?14:0);
+    return contestValue>withdrawValue?'force':'withdraw';
   }
   aiContractResponseDecision(claimant,intruder,contract){
     if(this.cooperationForcedBy(contract,claimant,intruder))return 'allow';
@@ -902,7 +1045,8 @@ export class Game {
     const intruderThreat=this.contractContributionScore(intruder,contract)+this.contestTraitScore(intruder,contract);
     const claimantContest=this.contractContributionScore(claimant,contract)+this.contestTraitScore(claimant,contract)+10+claimantControl;
     const mode=this.aiStrategicMode(claimant);
-    const allowValue=sharedChance+(contract.reward.gold||0)*0.04+(contract.reward.reputation||0)*1.6+(mode.rebuilding?8:0);
+    const claimantShare=this.cooperativeRewardShareForGuild(contract,claimant,claimant,this.contractParticipantGuilds(contract));
+    const allowValue=sharedChance+(contract.reward.gold||0)*0.04*claimantShare+(contract.reward.reputation||0)*1.6*claimantShare+(mode.rebuilding?8:0);
     const contestValue=claimantChance+(claimantContest-intruderThreat)*0.35+(contract.reward.reputation||0)*3+(mode.behind?14:0)+(mode.desperate?18:0);
     return contestValue>allowValue+8?'contest':'allow';
   }
@@ -918,8 +1062,9 @@ export class Game {
       contract.claim=contract.claim||{guildId:claimant.id,postures:{}};
       contract.claim.postures=contract.claim.postures||{};
       if(decision==='contest'){
-        contract.claim.postures[intruder.id]='compete';
-        this.log(claimant,'contract',`${claimant.name} contested ${intruder.name}'s move onto "${contract.title}".`);
+        contract.claim.postures[intruder.id]='rejected';
+        this.enqueueClaimForceResponse(contract,claimant,intruder);
+        this.log(claimant,'contract',`${claimant.name} rejected ${intruder.name}'s cooperation offer on "${contract.title}".`);
       }else{
         contract.claim.postures[intruder.id]='cooperate';
         this.log(claimant,'contract',`${claimant.name} allowed ${intruder.name} to cooperate on "${contract.title}".`);
@@ -928,7 +1073,47 @@ export class Game {
     this.state.pendingContractResponses=responses;
     this.closeCharacterPanelAfterResponse();
     if(this.state.resolvingContractResponses&&continueSeason)this.finishSeasonAfterContractResponses();
-    else if(this.openNextContractResponse())this.render();
+    else if(this.openNextContractResponse()||this.openNextClaimForceResponse())this.render();
+    else this.render();
+    return true;
+  }
+  enqueueClaimForceResponse(contract,claimant,intruder){
+    if(!contract||!claimant||!intruder||claimant.id===intruder.id)return false;
+    this.state.pendingClaimForceResponses=this.state.pendingClaimForceResponses||[];
+    const id=`${contract.instanceId}:${claimant.id}:${intruder.id}:force`;
+    if(this.state.pendingClaimForceResponses.some(response=>response.id===id))return false;
+    this.state.pendingClaimForceResponses.push({id,contractId:contract.instanceId,claimantId:claimant.id,intruderId:intruder.id});
+    if(!this.state.resolvingContractResponses&&(this.isLocalGuild(intruder)||this.isAiGuild(intruder)))this.openNextClaimForceResponse();
+    return true;
+  }
+  resolveClaimForceResponse(responseId,decision,{continueSeason=true}={}){
+    const responses=this.state.pendingClaimForceResponses||[];
+    const index=responses.findIndex(response=>response.id===responseId);
+    if(index<0)return false;
+    const [response]=responses.splice(index,1);
+    const contract=this.state.boardContracts.find(c=>c.instanceId===response.contractId);
+    const claimant=this.state.guilds.find(g=>g.id===response.claimantId);
+    const intruder=this.state.guilds.find(g=>g.id===response.intruderId);
+    if(contract&&claimant&&intruder){
+      contract.claim=contract.claim||{guildId:claimant.id,postures:{}};
+      contract.claim.postures=contract.claim.postures||{};
+      if(decision==='force'){
+        const team=this.placedTeam(intruder,contract);
+        const cost=this.competitionReputationCost(intruder,contract,claimant,team);
+        intruder.reputation=Math.max(0,intruder.reputation-cost);
+        contract.claim.postures[intruder.id]='compete';
+        this.log(intruder,'contract',`${intruder.name} forced ${claimant.name}'s claim on "${contract.title}".${cost?` Reputation -${cost}.`:''}`);
+      }else{
+        for(const worker of [...this.placedTeam(intruder,contract)])this.unplaceWorker(worker,intruder,true);
+        delete contract.claim?.postures?.[intruder.id];
+        this.syncContractClaim(contract);
+        this.log(intruder,'contract',`${intruder.name} withdrew from "${contract.title}" after ${claimant.name} rejected cooperation.`);
+      }
+    }
+    this.state.pendingClaimForceResponses=responses;
+    this.closeCharacterPanelAfterResponse();
+    if(this.state.resolvingContractResponses&&continueSeason)this.finishSeasonAfterContractResponses();
+    else if(this.openNextContractResponse()||this.openNextClaimForceResponse())this.render();
     else this.render();
     return true;
   }
@@ -1091,6 +1276,7 @@ export class Game {
   startYear() {
     for(const guild of this.state.guilds) {
       if(this.state.year>1) this.paySalaries(guild);
+      this.applyAnnualPatronReadiness(guild);
       if(this.activeWorkers(guild).length===0) {
         this.refillTavern();
         const pick=this.chooseRecruit(guild);
@@ -1220,6 +1406,7 @@ export class Game {
     for(const c of this.state.boardContracts) c.offerSeasons=Math.max(0,c.offerSeasons-1);
     this.state.boardContracts=this.state.boardContracts.filter(c=>c.offerSeasons>0||this.hasContractPlacements(c));
     if(this.state.focusContractId&&!this.state.boardContracts.some(c=>c.instanceId===this.state.focusContractId))this.state.focusContractId=null;
+    if(this.state.focusFacilityKey&&!this.facilityDef(this.state.focusFacilityKey))this.state.focusFacilityKey=null;
     const boardSize=this.boardSize();
     const active=this.state.boardContracts.filter(c=>this.hasContractPlacements(c));
     const idle=this.state.boardContracts.filter(c=>!this.hasContractPlacements(c));
@@ -1312,6 +1499,7 @@ export class Game {
         pick=this.weightedPick(pool.map((o,i)=>({item:o,weight:Math.max(1,o.value)+(pool.length-i)*3})));
       }
       if(!pick)break;
+      if(!this.contractAllowsNewPlacement(pick.contract,guild))break;
       if(pick.chance<minChance&&Math.random()>0.35*this.aiRisk(guild))break;
       const claimant=this.contractClaimant(pick.contract);
       if(pick.posture==='compete'){
@@ -1332,7 +1520,7 @@ export class Game {
     return placed>0;
   }
   aiContractPlacementOption(guild,contract){
-    if(contract.offerSeasons<=0||this.contractProgress(guild,contract))return null;
+    if(!this.contractAllowsNewPlacement(contract,guild))return null;
     const current=this.placedTeam(guild,contract);
     const open=this.contractOpenSlotCount(contract);
     const claimant=this.contractClaimant(contract);
@@ -1350,20 +1538,22 @@ export class Game {
     const mode=this.aiStrategicMode(guild);
     if(!rivalClaim){
       if(this.aiRejectsContractRisk(guild,contract,chance,mode))return null;
-      const value=this.aiContractValue(guild,contract,chance,team,add.length);
+      const value=this.aiContractValue(guild,contract,chance,team,add.length)+this.aiPatronContractValue(guild,contract,'claim');
       if(chance<this.aiFallbackChance(guild))return null;
       return {contract,add,chance,value:value+this.aiTraitSurfaceValue(guild,contract,add,'claim'),posture:'cooperate'};
     }
     if(!coopAdd.length&&!contestAdd.length)return null;
     const coopTeam=[...current,...coopAdd];
     const coopChance=this.successChanceForTeam(guild,contract,coopTeam);
-    const coopValue=coopAdd.length?this.aiContractValue(guild,contract,coopChance,coopTeam,coopAdd.length)*.68+contract.reward.reputation*1.5+contract.reward.gold*.05+this.aiTraitSurfaceValue(guild,contract,coopAdd,'cooperate'):-Infinity;
+    const projectedCooperators=coopAdd.length?[...new Set([...this.contractParticipantGuilds(contract),guild])]:[];
+    const coopShare=coopAdd.length?this.cooperativeRewardShareForGuild(contract,claimant,guild,projectedCooperators):0;
+    const coopValue=coopAdd.length?this.aiContractValue(guild,contract,coopChance,coopTeam,coopAdd.length)*coopShare+contract.reward.reputation*1.5*coopShare+contract.reward.gold*.05*coopShare+this.aiTraitSurfaceValue(guild,contract,coopAdd,'cooperate')+this.aiPatronContractValue(guild,contract,'cooperate'):-Infinity;
     const contestTeam=[...current,...contestAdd];
     const contestChance=this.successChanceForTeam(guild,contract,contestTeam);
     const contestPressure=(mode.behind?24:0)+(mode.desperate?30:0)+(this.aiRisk(guild)-1)*16;
     const claimValue=contract.reward.reputation*4+contract.reward.gold*.12+(contract.risk==='dangerous'?6:0)+(['deadly','lethal'].includes(contract.risk)?12:0);
     const repCost=this.competitionReputationCost(guild,contract,claimant,contestAdd)*8+(guild.reputation>0?0:20);
-    const competeValue=this.aiContractValue(guild,contract,contestChance,contestTeam,contestAdd.length)+contestPressure+claimValue+this.aiTraitSurfaceValue(guild,contract,contestAdd,'compete')-repCost;
+    const competeValue=this.aiContractValue(guild,contract,contestChance,contestTeam,contestAdd.length)+contestPressure+claimValue+this.aiTraitSurfaceValue(guild,contract,contestAdd,'compete')+this.aiPatronContractValue(guild,contract,'compete')-repCost;
     const blocked=this.competitionBlockedBy(contract,claimant,guild,contestAdd)||this.cooperationForcedBy(contract,claimant,guild,contestAdd);
     const canCompete=contestAdd.length&&!blocked&&guild.reputation>=this.competitionReputationCost(guild,contract,claimant,contestAdd)&&contestChance>=this.aiFallbackChance(guild)+4;
     const best=canCompete&&competeValue>coopValue?{contract,add:contestAdd,chance:contestChance,value:competeValue,posture:'compete'}:{contract,add:coopAdd,chance:coopChance,value:coopValue,posture:'cooperate'};
@@ -1430,7 +1620,7 @@ export class Game {
     return value;
   }
   contractPreview(guild,c){const team=this.placedTeam(guild,c);const previewTeam=team.length?team:this.chooseBestTeam(guild,c);return {team:previewTeam,chance:previewTeam.length?this.successChanceForTeam(guild,c,previewTeam):null};}
-  contractValue(guild,c){const p=this.contractPreview(guild,c);return p.chance===null?-999:this.aiContractValue(guild,c,p.chance,p.team);}
+  contractValue(guild,c){const p=this.contractPreview(guild,c);return p.chance===null?-999:this.aiContractValue(guild,c,p.chance,p.team)+this.aiPatronContractValue(guild,c,'claim');}
   aiRisk(guild){return guild.personality?.risk||1;}
   aiMinClaimChance(guild){
     const mode=this.aiStrategicMode(guild);
@@ -1452,22 +1642,131 @@ export class Game {
   }
   aiRewardValue(guild,contract){return contract.reward.gold*this.aiProfileValue(guild,'goldBias',0.25)+contract.reward.reputation*this.aiProfileValue(guild,'reputationBias',3);}
   aiFlavorScore(guild,tags){const prefs=guild.personality?.preferredTags||[];return tags.filter(t=>prefs.includes(t)).length;}
-  aiLaneWeights(guild){
+  aiPatronContractValue(guild,contract,posture='claim'){
+    const patron=this.patronDef(contract?.patron?.key);
+    if(!guild||!patron)return 0;
+    const thresholds=this.patronFavorThresholds();
+    const prefs=guild.personality?.preferredTags||[];
+    const priorities=guild.personality?.facilityPriorities||[];
+    const favor=this.patronFavor(guild,patron.key);
+    const projected=favor+this.aiProjectedPatronFavorGain(contract,posture);
+    const next=Object.values(thresholds).sort((a,b)=>a-b).find(value=>favor<value);
+    const traitFit=prefs.includes(patron.trait)?18:0;
+    const priorityIndex=priorities.indexOf(patron.facility);
+    const facilityFit=priorityIndex>=0?(priorities.length-priorityIndex)*10:0;
+    const facilityDemand=this.aiFacilityLaneDemand(guild,patron.facility)*0.18;
+    const laneNeed=patron.lane?this.aiLaneNeed(guild,patron.lane)*12:0;
+    const facilityPull=({chapel:16,archives:6,infirmary:10,scout:8,training:4,market:-4,workshop:-4,common:-6})[patron.facility]||0;
+    const thresholdReach=next&&projected>=next?26+(next===thresholds.ally?10:0):0;
+    const nearThreshold=next?Math.max(0,4-(next-favor))*5:0;
+    const duplicateDecay=favor>=thresholds.ally?0.28:favor>=thresholds.slot?0.55:favor>=thresholds.training?0.75:1;
+    const temperament=posture==='compete'?this.aiPatronContestPreference(guild,patron)*12:0;
+    const typeFit=traitFit+facilityFit>0?1.15:0.65;
+    return (traitFit+facilityFit+facilityDemand+laneNeed+facilityPull+thresholdReach+nearThreshold+temperament)*duplicateDecay*typeFit;
+  }
+  aiProjectedPatronFavorGain(contract,posture='claim'){
+    if(posture==='cooperate')return 1;
+    if(posture==='compete')return this.aiPatronContestPreference(null,this.patronDef(contract?.patron?.key))>0?3:2;
+    return 3;
+  }
+  aiPatronContestPreference(guild,patron){
+    if(!patron)return 0;
+    if(['watch','duke','borderlords','underworld','miners'].includes(patron.key))return 1;
+    if(['abbey','pilgrims','orphans','farmers','university','magistrates'].includes(patron.key))return -1;
+    return 0;
+  }
+  aiProfileLaneWeights(guild){
     const presets={
       balanced:{gold:1,reputation:1,completed:1,resources:1,connections:1},
-      scholars:{gold:.45,reputation:1.35,completed:.55,resources:.55,connections:1.2},
+      scholars:{gold:.55,reputation:1.35,completed:1.05,resources:.55,connections:.9},
       fighters:{gold:.55,reputation:1.15,completed:1.45,resources:.75,connections:.55},
       operators:{gold:1.05,reputation:.75,completed:.75,resources:.55,connections:1.45},
       merchants:{gold:1.55,reputation:.55,completed:.45,resources:.8,connections:1.05},
-      builders:{gold:.85,reputation:.7,completed:.7,resources:1.55,connections:.55},
+      builders:{gold:.85,reputation:.85,completed:.85,resources:1.45,connections:.6},
       explorers:{gold:.8,reputation:.9,completed:1.25,resources:.65,connections:1.15},
-      pious:{gold:.35,reputation:1.6,completed:.55,resources:.55,connections:.9},
-      relief:{gold:.45,reputation:1.45,completed:.5,resources:.75,connections:.8},
-      civic:{gold:.65,reputation:1.2,completed:.65,resources:.9,connections:1.15},
-      miners:{gold:.95,reputation:.75,completed:.7,resources:1.55,connections:.55},
+      pious:{gold:.55,reputation:1.25,completed:1.15,resources:.6,connections:.85},
+      relief:{gold:.65,reputation:1.15,completed:1.15,resources:.8,connections:.8},
+      civic:{gold:.7,reputation:1.15,completed:.85,resources:.9,connections:1.1},
+      miners:{gold:.9,reputation:.9,completed:.9,resources:1.4,connections:.6},
       gamblers:{gold:1.2,reputation:1.1,completed:1.05,resources:.55,connections:.65}
     };
     return presets[guild.personality?.id]||presets.balanced;
+  }
+  aiLaneWeights(guild){
+    const lanes=['gold','reputation','completed','resources','connections'];
+    const patronKey=Object.entries(guild.patronFavor||{}).sort((a,b)=>a[0].localeCompare(b[0])).map(([key,value])=>`${key}:${value}`).join(',');
+    const activeKey=this.activeWorkers(guild).map(worker=>worker.id).sort().join(',');
+    const cacheKey=[guild.id,this.state.year,this.state.seasonIndex,guild.gold,guild.reputation,guild.completed,guild.resources,guild.connections,activeKey,patronKey].join('|');
+    this._aiLaneWeightCache=this._aiLaneWeightCache||new Map();
+    if(this._aiLaneWeightCache.has(cacheKey))return this._aiLaneWeightCache.get(cacheKey);
+    const profile=this.aiProfileLaneWeights(guild);
+    const feasibility=Object.fromEntries(lanes.map(lane=>[lane,this.aiLaneFeasibility(guild,lane,profile[lane]||1)]));
+    const averageFeasibility=lanes.reduce((sum,lane)=>sum+feasibility[lane],0)/lanes.length||1;
+    const planningDelay=this.aiProfileValue(guild,'planningDelayYears',0);
+    const planningScale=this.aiProfileValue(guild,'planningScale',1);
+    const yearPressure=this.clamp((((this.state.year||1)-2-planningDelay)/10)*planningScale,0.05,0.78);
+    const weights=Object.fromEntries(lanes.map(lane=>{
+      const profileWeight=profile[lane]||1;
+      const feasibleWeight=this.clamp(feasibility[lane]/averageFeasibility,0.45,1.85);
+      return [lane,profileWeight*(1-yearPressure)+feasibleWeight*yearPressure];
+    }));
+    this._aiLaneWeightCache.set(cacheKey,weights);
+    if(this._aiLaneWeightCache.size>200)this._aiLaneWeightCache.clear();
+    return weights;
+  }
+  aiLaneFeasibility(guild,stat,profileWeight=1){
+    const goals=this.victoryGoals();
+    const target=Math.max(1,goals[stat]||1);
+    const progress=(guild[stat]||0)/target;
+    const seasonsLeft=Math.max(1,(20-(this.state.year||1))*4+(3-(this.state.seasonIndex||0))+1);
+    const production=this.aiLaneProductionPotential(guild,stat,Math.min(12,seasonsLeft))/target;
+    const contracts=this.aiLaneContractPotential(guild,stat)/target;
+    const patrons=this.aiPatronLaneCommitment(guild,stat);
+    const roster=this.aiRosterLanePotential(guild,stat);
+    const finishable=progress>=0.82?0.22+(progress-0.82)*1.4:0;
+    return 0.2+progress*1.1+production+contracts+patrons+roster+finishable+profileWeight*0.18;
+  }
+  aiLaneProductionPotential(guild,stat,seasons=8){
+    const facilities=this.data.contractParts.facilities||[];
+    return this.activeWorkers(guild).reduce((sum,worker)=>{
+      const best=facilities.reduce((value,facility)=>{
+        const rule=this.concurrentFacilityProductionRule(guild,facility,this.patronAdjustedFacilityProductionRule(guild,facility,this.facilityProductionRule(worker,facility)));
+        return Math.max(value,rule?.[stat]||0);
+      },0);
+      return sum+best*seasons;
+    },0);
+  }
+  aiLaneContractPotential(guild,stat){
+    if(stat==='completed'){
+      const active=this.activeWorkers(guild).length;
+      const bestFit=this.state.boardContracts.reduce((best,contract)=>Math.max(best,...this.activeWorkers(guild).map(worker=>this.characterFit(worker,contract))),0);
+      return active*2+bestFit*0.08;
+    }
+    if(stat==='gold'||stat==='reputation'){
+      return this.state.boardContracts.reduce((sum,contract)=>sum+(contract.reward?.[stat]||0)*0.7,0);
+    }
+    return 0;
+  }
+  aiPatronLaneCommitment(guild,stat){
+    const thresholds=this.patronFavorThresholds();
+    return (this.data.contractParts.patrons||[]).filter(patron=>patron.lane===stat).reduce((sum,patron)=>{
+      const favor=this.patronFavor(guild,patron.key);
+      if(favor>=thresholds.ally)return sum+0.32;
+      if(favor>=thresholds.slot)return sum+0.24;
+      if(favor>=thresholds.training)return sum+0.18;
+      if(favor>=thresholds.ready)return sum+0.08;
+      return sum;
+    },0);
+  }
+  aiRosterLanePotential(guild,stat){
+    const workers=this.activeWorkers(guild);
+    if(!workers.length)return 0;
+    if(stat==='resources')return workers.reduce((sum,worker)=>sum+(worker.resources||0),0)/Math.max(1,workers.length*5)*0.45;
+    if(stat==='connections')return workers.reduce((sum,worker)=>sum+(worker.connections||0),0)/Math.max(1,workers.length*5)*0.45;
+    if(stat==='completed')return Math.min(0.35,workers.length/18);
+    if(stat==='gold')return this.aiFlavorScore(guild,['Merchant','Shrewd','Frugal','Tax Collector','Innkeeper','Smuggler'])/120;
+    if(stat==='reputation')return this.aiFlavorScore(guild,['Noble','Faithful','Honest','Generous','Compassionate','Influential'])/120;
+    return 0;
   }
   aiVictoryScore(guild){
     const goals=this.victoryGoals();
@@ -1479,7 +1778,7 @@ export class Game {
     const goals=this.victoryGoals();
     const weights=this.aiLaneWeights(guild);
     const progress=(guild[stat]||0)/Math.max(1,goals[stat]||1);
-    return (weights[stat]||1)*Math.max(0.15,1-progress);
+    return (weights[stat]||1)*Math.max(0.28,1-progress*0.62);
   }
   aiProductionValue(guild,rule){
     if(!rule)return 0;
@@ -1494,7 +1793,7 @@ export class Game {
     const prefs=guild.personality?.facilityPriorities||[];
     const facilityValue=this.data.contractParts.facilities.reduce((best,facility)=>{
       if(!this.facilityHasOpenSlot(guild,facility,worker))return best;
-      const rule=this.facilityProductionRule(worker,facility);
+      const rule=this.concurrentFacilityProductionRule(guild,facility,this.patronAdjustedFacilityProductionRule(guild,facility,this.facilityProductionRule(worker,facility)));
       const exploit=this.aiProductionValue(guild,rule);
       const setup=this.facilitySetupRules().filter(setupRule=>setupRule.facility===facility.key&&this.workerHasAny(worker,setupRule.tags)).reduce((sum,setupRule)=>sum+setupRule.targets.reduce((targetSum,target)=>targetSum+this.aiFacilityLaneDemand(guild,target),0),0);
       const priority=prefs.includes(facility.key)?8:0;
@@ -1508,7 +1807,7 @@ export class Game {
     if(!facility)return 0;
     const ready=this.facilityReadyCount(guild,facilityKey);
     const exploiters=this.activeWorkers(guild).filter(worker=>this.facilityProductionRule(worker,facility));
-    const best=exploiters.reduce((value,worker)=>Math.max(value,this.aiProductionValue(guild,this.facilityProductionRule(worker,facility))),0);
+    const best=exploiters.reduce((value,worker)=>Math.max(value,this.aiProductionValue(guild,this.concurrentFacilityProductionRule(guild,facility,this.patronAdjustedFacilityProductionRule(guild,facility,this.facilityProductionRule(worker,facility))))),0);
     return best*(ready?0.35:1)+Math.max(0,2-ready)*5;
   }
   aiStrategicMode(guild){
@@ -1621,6 +1920,9 @@ export class Game {
   }
   contractOccupiedSlotCount(contract){return this.contractSlotOccupants(contract,null).length;}
   contractOpenSlotCount(contract){return Math.max(0,this.contractSharedSlotLimit()-this.contractOccupiedSlotCount(contract));}
+  contractAllowsNewPlacement(contract,guild){
+    return Boolean(contract&&contract.offerSeasons>0&&!contract.sharedProgress&&!this.contractProgress(guild,contract));
+  }
   placeWorker(characterId,targetId,targetType='contract',mode='work'){
     const guild=this.activeLocalGuild();
     if(this.state.phase!=='awaitHuman'||this.state.humanActionUsed)return false;
@@ -1630,7 +1932,7 @@ export class Game {
     if(targetType==='facility')return this.placeFacilityWorker(worker,targetId,guild,mode);
     const contract=this.state.boardContracts.find(c=>c.instanceId===targetId);
     if(!contract)return false;
-    if(contract.offerSeasons<=0||this.contractProgress(guild,contract))return false;
+    if(!this.contractAllowsNewPlacement(contract,guild))return false;
     const claimant=this.contractClaimant(contract);
     const posture=claimant&&claimant.id!==guild.id&&mode==='compete'?'compete':'cooperate';
     const alreadyHere=worker.placement?.type==='contract'&&worker.placement.id===contract.instanceId;
@@ -1673,7 +1975,7 @@ export class Game {
     if(!facility)return false;
     if(worker.placement&&!this.unplaceWorker(worker,guild))return false;
     const placed=this.facilityWorkers(guild,facilityKey,'work');
-    const limit=facility.slots;
+    const limit=this.facilitySlotCount(guild,facility);
     if(placed.length>=limit)return false;
     worker.placement={type:'facility',id:facilityKey,mode:'work'};
     this.render();
@@ -1711,6 +2013,71 @@ export class Game {
     return true;
   }
   facilityDef(key){return this.data.contractParts.facilities.find(f=>f.key===key);}
+  patronDef(key){return this.data.contractParts.patrons.find(p=>p.key===key);}
+  patronFavorThresholds(){return this.data.contractParts.settings.patronFavorThresholds||{ready:2,training:4,slot:6,ally:8};}
+  patronFavor(guild,patronKey){return guild?.patronFavor?.[patronKey]||0;}
+  facilityPatrons(facilityKey){return (this.data.contractParts.patrons||[]).filter(patron=>patron.facility===facilityKey);}
+  facilityBestFavor(guild,facilityKey){
+    return this.facilityPatrons(facilityKey).reduce((best,patron)=>Math.max(best,this.patronFavor(guild,patron.key)),0);
+  }
+  facilityHasPatronTier(guild,facilityKey,tier){
+    const threshold=this.patronFavorThresholds()[tier]||Infinity;
+    return this.facilityBestFavor(guild,facilityKey)>=threshold;
+  }
+  facilitySlotCount(guild,facility){
+    const base=facility?.slots||0;
+    return base+(this.facilityHasPatronTier(guild,facility.key,'slot')?1:0);
+  }
+  facilityTrainingPatronBonus(guild,facility){
+    if(!this.facilityHasPatronTier(guild,facility.key,'training'))return 0;
+    return this.facilityPatrons(facility.key).filter(patron=>this.patronFavor(guild,patron.key)>=this.patronFavorThresholds().training).length>1?12:8;
+  }
+  facilityEvolutionPatron(guild,facility){
+    const threshold=this.patronFavorThresholds().ready;
+    return this.facilityPatrons(facility.key)
+      .filter(patron=>this.patronFavor(guild,patron.key)>=threshold)
+      .sort((a,b)=>this.patronFavor(guild,b.key)-this.patronFavor(guild,a.key))[0]||null;
+  }
+  facilityDisplayLabel(guild,facility){
+    return this.facilityEvolutionPatron(guild,facility)?.path||facility.label;
+  }
+  patronFavorLabel(guild,patron){
+    const favor=this.patronFavor(guild,patron.key);
+    return `${patron.path} ${favor}`;
+  }
+  addPatronFavor(guild,contract,amount,reason='contract'){
+    const key=contract?.patron?.key;
+    const patron=this.patronDef(key);
+    if(!guild||!patron||!amount)return 0;
+    guild.patronFavor=guild.patronFavor||{};
+    const before=this.patronFavor(guild,key);
+    const after=Math.max(0,before+amount);
+    guild.patronFavor[key]=after;
+    if(after===before)return 0;
+    const sign=after>before?'+':'';
+    this.log(guild,after>before?'good':'bad',`${patron.name} favor ${sign}${after-before} (${after}) for ${reason}.`);
+    const ally=this.patronFavorThresholds().ally;
+    if(before<ally&&after>=ally){
+      this.gainGuildStat(guild,'connections',1,null,`${patron.name} ally`);
+      this.log(guild,'good',`${patron.name} became a standing ally for the ${this.facilityDef(patron.facility)?.label||patron.facility}.`);
+    }
+    return after-before;
+  }
+  applyPatronContestReaction(guild,contract,won=false){
+    const patron=this.patronDef(contract?.patron?.key);
+    if(!patron)return;
+    const approving=['watch','duke','borderlords','underworld','miners'];
+    const disapproving=['abbey','pilgrims','orphans','farmers','university','magistrates'];
+    if(approving.includes(patron.key))this.addPatronFavor(guild,contract,won?1:0,won?'decisive contest':'contest attempt');
+    else if(disapproving.includes(patron.key))this.addPatronFavor(guild,contract,-1,'rough contest');
+  }
+  applyAnnualPatronReadiness(guild){
+    const threshold=this.patronFavorThresholds().ready;
+    for(const patron of this.data.contractParts.patrons||[]){
+      if(this.patronFavor(guild,patron.key)<threshold)continue;
+      this.addFacilityReady(guild,patron.facility,1,3,`${patron.name} patronage`);
+    }
+  }
   facilityWorkers(guild,key,mode=null){return guild.roster.filter(c=>c.placement?.type==='facility'&&c.placement.id===key&&(!mode||c.placement.mode===mode));}
   recoverySlotCount(){return this.data.contractParts.settings.recoverySlots||2;}
   recoveryWorkers(guild){return guild.roster.filter(c=>c.placement?.type==='recovery');}
@@ -1736,7 +2103,7 @@ export class Game {
     this.finishSeasonAfterContractResponses();
   }
   finishSeasonAfterContractResponses(){
-    if(this.openNextContractResponse())return;
+    if(this.openNextContractResponse()||this.openNextClaimForceResponse())return;
     this.state.resolvingContractResponses=false;
     this.resolveSeasonContracts();
     if(this.checkVictory())return;
@@ -1797,7 +2164,7 @@ export class Game {
     const recruitOption=!guild.hiredThisSeason&&this.activeWorkers(guild).length<targetRoster?this.aiRecruitActionValue(guild,targetRoster):null;
     const facilityOption=this.aiFacilityActionValue(guild);
     const contractOption=this.aiContractActionValue(guild);
-    const top=[recruitOption,facilityOption,contractOption].filter(Boolean).sort((a,b)=>b.value-a.value)[0];
+    const top=this.aiPickBestOption(guild,[recruitOption,facilityOption,contractOption].filter(Boolean));
     if(top?.type==='recruit'&&top.value>18&&await this.aiCatchUpRecruit(guild,this.activeWorkers(guild).length+1))acted=true;
     if(top?.type==='facility'&&top.value>16&&await this.aiPlaceFacility(guild,top.choice))acted=true;
     if(top?.type==='contract'&&await this.aiPlaceContractWorkers(guild,top.choice))return true;
@@ -1815,17 +2182,17 @@ export class Game {
     const candidates=this.state.tavern.filter(c=>!c.refusesGuildIds.includes(guild.id)&&this.canRecruit(guild,c));
     if(!candidates.length)return null;
     const target=[...this.state.boardContracts].sort((a,b)=>this.contractValue(guild,b)-this.contractValue(guild,a))[0];
-    const best=[...candidates].sort((a,b)=>this.recruitValue(guild,b,target)-this.recruitValue(guild,a,target))[0];
+    const best=this.aiPickBestOption(guild,candidates.map(candidate=>({worker:candidate,value:this.recruitValue(guild,candidate,target)})))?.worker;
     if(!best)return null;
     const shortage=Math.max(0,targetRoster-this.activeWorkers(guild).length)*8;
     return {type:'recruit',value:this.recruitValue(guild,best,target)*0.55+shortage,choice:best};
   }
   aiFacilityActionValue(guild){
-    const best=this.aiFacilityPlacementOptions(guild).sort((a,b)=>b.value-a.value)[0];
+    const best=this.aiPickBestOption(guild,this.aiFacilityPlacementOptions(guild));
     return best?{type:'facility',value:best.value,choice:best}:null;
   }
   aiContractActionValue(guild){
-    const best=this.state.boardContracts.map(contract=>this.aiContractPlacementOption(guild,contract)).filter(Boolean).sort((a,b)=>b.value-a.value)[0];
+    const best=this.aiPickBestOption(guild,this.state.boardContracts.map(contract=>this.aiContractPlacementOption(guild,contract)).filter(Boolean));
     return best?{type:'contract',value:best.value,choice:best}:null;
   }
   aiRestChance(guild,mode=this.aiStrategicMode(guild)){
@@ -1955,7 +2322,7 @@ export class Game {
         if(!worker)break;
         const facility=this.chooseFacility(guild,worker);
         if(!facility)break;
-        if(this.facilityWorkers(guild,facility.key,'work').length>=facility.slots)break;
+        if(this.facilityWorkers(guild,facility.key,'work').length>=this.facilitySlotCount(guild,facility))break;
         choice = {worker, facility};
       }
       if(!choice)break;
@@ -1986,7 +2353,7 @@ export class Game {
       .sort((a,b)=>this.facilityValue(guild,worker,b,prefs)-this.facilityValue(guild,worker,a,prefs))[0];
   }
   facilityHasOpenSlot(guild,facility,worker=null){
-    return facility.slots>this.facilityWorkers(guild,facility.key,'work').length;
+    return this.facilitySlotCount(guild,facility)>this.facilityWorkers(guild,facility.key,'work').length;
   }
   aiFacilityPlacementOptions(guild){
     const options=[];
@@ -2003,18 +2370,21 @@ export class Game {
     const train=(facility.traits||[]).filter(t=>!this.visibleTraits(worker).includes(t)).length*4;
     const flavor=(facility.traits||[]).filter(t=>prefs.includes(t)).length*8;
     const priorities=guild.personality?.facilityPriorities||[];
-    const priority=priorities.includes(facility.key)?(priorities.length-priorities.indexOf(facility.key))*12:0;
+    const supportOnly=facility.key==='archives';
+    const priorityScale=supportOnly&&this.state.year>4?0.45:1;
+    const priority=priorities.includes(facility.key)?(priorities.length-priorities.indexOf(facility.key))*12*priorityScale:0;
     const activation=this.workerTraitEffects(worker,'facilityResolve').filter(effect=>this.effectMatchesContract(effect,null,{guild,worker,facility,mode:'work'})).length*12;
     const support=this.state.boardContracts.reduce((sum,contract)=>sum+this.workerTraitEffects(worker,'facilitySupport').filter(effect=>this.effectMatchesContract(effect,contract,{guild,worker,facility,mode:'work',team:this.chooseBestTeam(guild,contract)})).reduce((s,effect)=>s+(effect.amount||0),0),0);
     const trainingSupport=this.facilityTrainingSupportTraitEffectScore(guild,worker,facility);
     const outgoingTraining=this.workerTraitEffects(worker,'facilityTrainingSupport').filter(effect=>this.effectMatchesContract(effect,null,{guild,worker,facility,mode:'work'})).length*8;
-    const production=this.facilityProductionRule(worker,facility);
-    const readyExploit=this.facilityReadyCount(guild,facility.key)?this.aiProductionValue(guild,production):0;
+    const production=this.concurrentFacilityProductionRule(guild,facility,this.patronAdjustedFacilityProductionRule(guild,facility,this.facilityProductionRule(worker,facility)));
+    const readyExploit=this.facilityReadyCount(guild,facility.key)?this.aiProductionValue(guild,production)*1.45:0;
     const readySetup=this.facilitySetupRules().filter(rule=>rule.facility===facility.key&&this.workerHasAny(worker,rule.tags)).reduce((sum,rule)=>sum+rule.targets.reduce((targetSum,target)=>targetSum+this.aiFacilityLaneDemand(guild,target),0),0);
     const doneNeed=this.aiLaneNeed(guild,'completed');
     const contractSetup=(facility.key==='scout'&&this.workerHasAny(worker,['Scout','Outrider','Courier','Forester','Hunter','Watchful','Curious'])?14*doneNeed:0)+(facility.key==='archives'&&this.workerHasAny(worker,['Scholar','Learned','Tutor','Clerk','Scribe','Careful','Curious'])?18*doneNeed:0);
-    const productionPotential=this.aiProductionValue(guild,production)*0.35;
-    return train+flavor+priority+activation+support+trainingSupport+outgoingTraining+readyExploit+readySetup+contractSetup+productionPotential+Math.random()*5;
+    const productionPotential=this.aiProductionValue(guild,production)*0.5;
+    const concurrentSetup=this.concurrentFacilitySetupValue(guild,facility);
+    return train+flavor+priority+activation+support+trainingSupport+outgoingTraining+readyExploit+readySetup+contractSetup+productionPotential+concurrentSetup+Math.random()*5;
   }
 
   guildNeedsRest(guild){return this.availableWorkers(guild).some(c=>c.conditions?.some(condition=>this.conditionDef(condition.key)?.recoveryPerRest>0));}
@@ -2087,7 +2457,8 @@ export class Game {
   facilityTrainingChance(guild,worker,facility){
     const assist=this.workerTraitEffects(worker,'facilityWork').filter(effect=>effect.type==='trainingAssist'&&this.effectMatchesContract(effect,null,{worker,facility,mode:worker.placement?.mode})).reduce((sum,effect)=>sum+(effect.amount||0),0);
     const support=this.facilityTrainingSupportTraitEffectScore(guild,worker,facility);
-    return this.clamp((facility.trainChance||0)+assist+support,0,85);
+    const planned=this.facilityPlanningApplies(guild,facility)?(this.consumeFacilityTrainingPlan(guild,facility.key,`${worker.name} at the ${facility.label}`)?10:0):0;
+    return this.clamp((facility.trainChance||0)+assist+support+planned+this.facilityTrainingPatronBonus(guild,facility),0,85);
   }
   applyFacilityReadinessWork(guild,worker,facility){
     if(facility.key==='scout'&&this.workerHasAny(worker,['Scout','Outrider','Courier','Forester','Hunter','Watchful','Curious'])){
@@ -2097,6 +2468,8 @@ export class Game {
     if(facility.key==='archives'&&this.workerHasAny(worker,['Scholar','Learned','Tutor','Clerk','Scribe','Careful','Curious'])){
       const contract=this.readinessTargetContract(guild,'planned');
       if(contract)this.addContractReadiness(guild,contract,'planned',1,1,`${worker.name} at the ${facility.label}`);
+      const focusedFacility=this.readinessTargetFacility(guild);
+      if(focusedFacility)this.addFacilityTrainingPlan(guild,focusedFacility.key,`${worker.name} at the ${facility.label}`);
     }
     for(const rule of this.facilitySetupRules()){
       if(rule.facility!==facility.key||!this.workerHasAny(worker,rule.tags))continue;
@@ -2120,7 +2493,35 @@ export class Game {
     const readable=targets.filter(key=>this.facilityDef(key));
     return readable.sort((a,b)=>this.facilityReadyCount(guild,a)-this.facilityReadyCount(guild,b))[0]||null;
   }
+  readinessTargetFacility(guild){
+    if(!this.isLocalGuild(guild))return null;
+    return this.facilityDef(this.state.focusFacilityKey)||null;
+  }
+  facilityPlanningApplies(guild,facility){
+    return this.isLocalGuild(guild)&&this.state.focusFacilityKey===facility?.key;
+  }
   facilityReadyCount(guild,facilityKey){return guild.facilityReadiness?.[facilityKey]?.ready||0;}
+  facilityTrainingPlanCount(guild,facilityKey){return guild.facilityReadiness?.[facilityKey]?.plannedTraining||0;}
+  addFacilityTrainingPlan(guild,facilityKey,source='Archives planning'){
+    guild.facilityReadiness=guild.facilityReadiness||{};
+    const current={...(guild.facilityReadiness[facilityKey]||{})};
+    const before=current.plannedTraining||0;
+    current.plannedTraining=Math.min(1,before+1);
+    guild.facilityReadiness[facilityKey]=current;
+    if(current.plannedTraining!==before){
+      const facility=this.facilityDef(facilityKey);
+      this.log(guild,'good',`${source} planned training at the ${facility?.label||facilityKey}. Next training roll there gains +10%.`);
+    }
+  }
+  consumeFacilityTrainingPlan(guild,facilityKey,source='Facility training'){
+    const current=guild.facilityReadiness?.[facilityKey];
+    if(!current?.plannedTraining)return false;
+    current.plannedTraining--;
+    if(current.plannedTraining<=0)delete current.plannedTraining;
+    const facility=this.facilityDef(facilityKey);
+    this.log(guild,'good',`${source} used Planned training at the ${facility?.label||facilityKey}. Training chance +10%.`);
+    return true;
+  }
   addFacilityReady(guild,facilityKey,amount=1,max=3,source='Facility work'){
     guild.facilityReadiness=guild.facilityReadiness||{};
     const current={...(guild.facilityReadiness[facilityKey]||{})};
@@ -2142,7 +2543,8 @@ export class Game {
     return true;
   }
   applyReadyFacilityProduction(guild,worker,facility){
-    const rule=this.facilityProductionRule(worker,facility);
+    const baseRule=this.facilityProductionRule(worker,facility);
+    const rule=this.concurrentFacilityProductionRule(guild,facility,this.patronAdjustedFacilityProductionRule(guild,facility,baseRule));
     if(!rule||!this.facilityReadyCount(guild,facility.key))return false;
     const source=`${worker.name} at the ${facility.label}`;
     if(!this.consumeFacilityReady(guild,facility.key,source))return false;
@@ -2160,7 +2562,7 @@ export class Game {
     const profession=tags=>tags.includes(worker.archetype);
     const rule={};
     if(facility.key==='workshop'&&profession(['Blacksmith','Armorer','Boatwright','Carpenter','Glassmaker','Mason','Miner','Stonecutter','Weaver'])){
-      rule.resources=profession(['Blacksmith','Miner','Stonecutter','Mason'])?3:2;
+      rule.resources=profession(['Blacksmith','Miner','Stonecutter','Mason'])?4:3;
       if(has(['Craftsman','Smith']))rule.resources+=1;
       if(has(['Inventive','Practical']))rule.gold=4;
     }
@@ -2190,6 +2592,7 @@ export class Game {
       rule.connections=profession(['Courier','Outrider','Smuggler'])?2:1;
       if(profession(['Hunter','Outrider','Forester'])||has(['Scout','Watchful']))rule.completed=1;
       if(has(['Curious','Resourceful']))rule.connections=(rule.connections||0)+1;
+      if(has(['Rural','Resourceful','Hardy']))rule.resources=1;
     }
     if(facility.key==='archives'&&profession(['Clerk','Scribe','Tutor','Monk','Tax Collector','Bailiff'])){
       rule.connections=profession(['Clerk','Tutor','Tax Collector'])?2:1;
@@ -2204,6 +2607,79 @@ export class Game {
     }
     return Object.keys(rule).length?rule:null;
   }
+  patronAdjustedFacilityProductionRule(guild,facility,rule){
+    if(!rule||!this.facilityHasPatronTier(guild,facility.key,'training'))return rule;
+    const adjusted={...rule};
+    for(const patron of this.facilityPatrons(facility.key)){
+      if(!this.patronProductionUnlocked(guild,facility,patron))continue;
+      const bonus=this.patronProductionBonusRule(patron);
+      for(const [stat,amount] of Object.entries(bonus))adjusted[stat]=(adjusted[stat]||0)+amount;
+    }
+    return adjusted;
+  }
+  concurrentFacilityProductionRule(guild,facility,rule){
+    if(!rule)return rule;
+    const adjusted={...rule};
+    const hasWork=key=>key!==facility.key&&this.facilityWorkers(guild,key,'work').length>0;
+    const pairedCount=keys=>keys.filter(hasWork).length;
+    if(facility.key==='workshop'&&adjusted.resources)adjusted.resources+=Math.min(3,pairedCount(['archives','market','scout','common']));
+    if(facility.key==='market'){
+      if(adjusted.gold)adjusted.gold+=pairedCount(['archives','workshop','common','scout'])*3;
+      if(adjusted.connections)adjusted.connections+=Math.min(3,pairedCount(['archives','common','scout','chapel']));
+    }
+    if(facility.key==='scout'){
+      if(adjusted.connections)adjusted.connections+=Math.min(3,pairedCount(['archives','market','training','common']));
+      if(adjusted.resources)adjusted.resources+=Math.min(2,pairedCount(['workshop','infirmary','common']));
+    }
+    if(['chapel','common','infirmary','archives'].includes(facility.key)&&adjusted.reputation){
+      adjusted.reputation+=Math.min(3,pairedCount(['chapel','common','infirmary','archives']));
+    }
+    if(facility.key==='archives'&&adjusted.connections)adjusted.connections+=Math.min(2,pairedCount(['market','scout','common']));
+    return adjusted;
+  }
+  concurrentFacilitySetupValue(guild,facility){
+    if(facility.key==='archives'){
+      const readyProduction=this.data.contractParts.facilities
+        .filter(other=>other.key!=='archives'&&this.facilityReadyCount(guild,other.key))
+        .reduce((sum,other)=>{
+          const best=this.activeWorkers(guild).reduce((value,worker)=>Math.max(value,this.aiProductionValue(guild,this.patronAdjustedFacilityProductionRule(guild,other,this.facilityProductionRule(worker,other)))),0);
+          return sum+best*0.16;
+        },0);
+      return readyProduction+12;
+    }
+    if(['workshop','market','scout','chapel','common','infirmary','archives'].some(key=>key!==facility.key&&this.facilityWorkers(guild,key,'work').length))return 8;
+    return 0;
+  }
+  concurrentFacilityPartnerCount(guild,facility){
+    return ['archives','workshop','market','scout','chapel','common','infirmary','training']
+      .filter(key=>key!==facility.key&&this.facilityWorkers(guild,key,'work').length>0).length;
+  }
+  patronProductionFavorThreshold(patron){
+    const thresholds=this.patronFavorThresholds();
+    return thresholds.training;
+  }
+  patronProductionUnlocked(guild,facility,patron){
+    const thresholds=this.patronFavorThresholds();
+    const favor=this.patronFavor(guild,patron.key);
+    if(favor<thresholds.training)return false;
+    if(!['resources','connections'].includes(patron?.lane))return true;
+    return favor>=thresholds.ally||this.concurrentFacilityPartnerCount(guild,facility)>0;
+  }
+  patronProductionUnlockText(patron){
+    const thresholds=this.patronFavorThresholds();
+    const bonus=this.facilityProductionText(this.patronProductionBonusRule(patron));
+    if(['resources','connections'].includes(patron?.lane))return `Favor ${thresholds.training} plus concurrent supporting facility work, or Favor ${thresholds.ally} as an ally, adds ${bonus} when Ready production runs there.`;
+    return `Favor ${thresholds.training}: adds ${bonus} when Ready production runs there.`;
+  }
+  patronProductionBonusRule(patron){
+    const lane=patron?.lane;
+    if(lane==='gold')return {gold:8};
+    if(lane==='reputation')return {reputation:2};
+    if(lane==='completed')return {completed:1};
+    if(lane==='resources')return {resources:3};
+    if(lane==='connections')return {connections:2};
+    return {};
+  }
   facilityProductionText(rule){
     const parts=[];
     if(rule.gold)parts.push(`+${rule.gold} Gold`);
@@ -2217,6 +2693,7 @@ export class Game {
   readinessTargetContract(guild,mark){
     const focused=this.isLocalGuild(guild)?this.state.boardContracts.find(c=>c.instanceId===this.state.focusContractId):null;
     if(focused&&this.contractCanGainReadiness(guild,focused,mark))return focused;
+    if(mark==='planned')return null;
     return this.state.boardContracts
       .filter(contract=>this.contractCanGainReadiness(guild,contract,mark))
       .sort((a,b)=>this.contractValue(guild,b)-this.contractValue(guild,a))[0]||null;
@@ -2445,6 +2922,7 @@ export class Game {
     }else{
       for(const guild of participants){
         guild.reputation=Math.max(0,guild.reputation-(guild.id===claimant.id?3:1));
+        this.addPatronFavor(guild,contract,-1,'failed work');
         this.applyFailure(guild,contract);
       }
       this.log(claimant,'bad',`${claimant.name}'s cooperative push on "${contract.title}" failed at ${chance}% odds.`);
@@ -2461,9 +2939,15 @@ export class Game {
     const roll=Math.random()*100;
     if(roll<=chance||this.convertNearMiss(winner,contract,team,roll,chance)){
       this.awardPrimaryContract(contract,winner,chance,`won the contest for`);
-      for(const guild of contenders.filter(g=>g.id!==winner.id))guild.reputation=Math.max(0,guild.reputation-1);
+      for(const guild of contenders.filter(g=>g.id!==winner.id)){
+        guild.reputation=Math.max(0,guild.reputation-1);
+        this.applyPatronContestReaction(guild,contract,false);
+      }
     }else{
-      for(const guild of contenders)guild.reputation=Math.max(0,guild.reputation-(guild.id===winner.id?3:1));
+      for(const guild of contenders){
+        guild.reputation=Math.max(0,guild.reputation-(guild.id===winner.id?3:1));
+        this.addPatronFavor(guild,contract,guild.id===winner.id?-1:0,'failed contest');
+      }
       this.applyFailure(winner,contract);
       this.log(winner,'bad',`${winner.name} won the contest for "${contract.title}" but failed the work at ${chance}% odds.`);
     }
@@ -2481,14 +2965,14 @@ export class Game {
     guild.poolWins[contract.pool]=(guild.poolWins[contract.pool]||0)+1;
     this.applyContractWorldEffect(contract);
     this.log(guild,'good',`${guild.name} ${verb} "${contract.title}" at ${chance}% odds. +${contract.reward.gold} gold, +${contract.reward.reputation} reputation.`);
+    this.addPatronFavor(guild,contract,verb.includes('contest')?2:3,verb.includes('contest')?'successful contest':'completed work');
+    if(verb.includes('contest'))this.applyPatronContestReaction(guild,contract,true);
     if(facilitySupport>0)this.log(guild,'good',`${guild.name}'s facility engine added ${facilitySupport}% support to "${contract.title}".`);
     this.applyContractSuccessTraitEffects(guild,contract,team);
   }
   awardCooperativeContract(contract,claimant,participants,chance){
-    const weights=participants.map(guild=>({guild,score:Math.max(1,this.contractContributionScore(guild,contract))}));
-    const total=weights.reduce((sum,row)=>sum+row.score,0)||1;
-    for(const {guild,score} of weights){
-      const share=score/total;
+    const shares=this.cooperativeRewardShares(contract,claimant,participants);
+    for(const {guild,share} of shares){
       const gold=Math.round(contract.reward.gold*share);
       const reputation=Math.round(contract.reward.reputation*share);
       guild.gold+=gold;
@@ -2499,10 +2983,30 @@ export class Game {
         guild.poolWins[contract.pool]=(guild.poolWins[contract.pool]||0)+1;
       }
       this.applyContractSuccessTraitEffects(guild,contract,this.placedTeam(guild,contract));
+      this.addPatronFavor(guild,contract,guild.id===claimant.id?3:1,guild.id===claimant.id?'claimed completion':'successful cooperation');
       this.log(guild,'good',`${guild.name} earned ${Math.round(share*100)}% of "${contract.title}". +${gold} gold, +${reputation} reputation.`);
     }
     this.applyContractWorldEffect(contract);
     this.log(claimant,'good',`${claimant.name}'s cooperative claim completed "${contract.title}" at ${chance}% odds.`);
+  }
+  cooperativeRewardShares(contract,claimant,participants){
+    const weights=participants.map(guild=>({guild,score:Math.max(1,this.contractContributionScore(guild,contract))}));
+    const total=weights.reduce((sum,row)=>sum+row.score,0)||1;
+    const claimantWeight=weights.find(row=>row.guild.id===claimant.id);
+    if(!claimantWeight)return weights.map(({guild,score})=>({guild,share:score/total}));
+    if(weights.length===1)return [{guild:claimant,share:1}];
+    const claimantShare=Math.max(this.cooperativeClaimantShareForCount(weights.length),claimantWeight.score/total);
+    const remainder=Math.max(0,1-claimantShare);
+    const otherTotal=weights.filter(row=>row.guild.id!==claimant.id).reduce((sum,row)=>sum+row.score,0)||1;
+    return weights.map(({guild,score})=>guild.id===claimant.id?{guild,share:claimantShare}:{guild,share:remainder*(score/otherTotal)});
+  }
+  cooperativeClaimantShareForCount(participantCount){
+    if(participantCount<=1)return 1;
+    if(participantCount===2)return this.clamp(this.data.contractParts.settings.cooperativeClaimantDuelShare??0.7,0,1);
+    return this.clamp(1/(participantCount-1),0,1);
+  }
+  cooperativeRewardShareForGuild(contract,claimant,guild,participants=this.contractParticipantGuilds(contract)){
+    return this.cooperativeRewardShares(contract,claimant,participants).find(row=>row.guild.id===guild.id)?.share||0;
   }
   convertNearMiss(guild,contract,team,roll,chance){
     const effects=team.flatMap(worker=>this.workerTraitEffects(worker,'contractFailure').filter(effect=>effect.type==='nearMissSuccess'&&this.effectMatchesContract(effect,contract,{guild,worker,team,role:this.workerContractRole(team,worker)})).map(effect=>({worker,effect})));
@@ -2593,9 +3097,12 @@ export class Game {
   }
   rawSuccessChanceForTeam(guild,c,chars){const progress=this.contractProgress(guild,c);const materials=typeof progress?.materials==='number'?progress.materials:Math.min(guild.resources,c.materials||0);const score=chars.reduce((s,ch)=>s+this.characterTagScore(ch,c)+ch.resources*3+ch.connections*2-this.conditionPenalty(ch),0)+materials*10+guild.connections*2+this.contractTraitEffectScore(guild,c,chars,materials)+this.facilitySupportTraitEffectScore(guild,c,chars,materials)+this.contractReadinessBonus(guild,c);return Math.round(50+score-c.baseDifficulty);}
   contractReadiness(guild,contract){return contract?.readiness?.[guild.id]||{};}
+  contractPlanningApplies(guild,contract){
+    return this.isLocalGuild(guild)&&this.state.focusContractId===contract?.instanceId;
+  }
   contractReadinessBonus(guild,contract){
     const readiness=this.contractReadiness(guild,contract);
-    return (readiness.scouted||0)*5+(readiness.planned?10:0);
+    return (readiness.scouted||0)*5+(readiness.planned&&this.contractPlanningApplies(guild,contract)?10:0);
   }
   contractTraitEffectScore(guild,contract,team,materials=0){
     let score=0;
@@ -2814,6 +3321,9 @@ export class Game {
   }
   victoryGoals(){return this.data.contractParts.settings.victoryGoals||{gold:420,reputation:160,completed:45,resources:55,connections:45};}
   victoryLaneLabel(stat){return {gold:'Wealth',reputation:'Reputation',completed:'Contracts',resources:'Resources',connections:'Connections'}[stat]||stat;}
+  victoryProgressScore(contender,goals=this.victoryGoals()){
+    return Object.entries(goals).reduce((sum,[stat,target])=>sum+((contender[stat]||0)/Math.max(1,target))*100,0);
+  }
   checkVictory(){
     const goals=this.victoryGoals();
     const contenders=this.victoryContenders();
@@ -2838,7 +3348,15 @@ export class Game {
     }
     return [...teams.values()];
   }
-  endGame(){this.state.phase='gameOver';const ranked=[...this.victoryContenders()].sort((a,b)=>(b.reputation+b.completed+b.gold/10+b.resources+b.connections)-(a.reputation+a.completed+a.gold/10+a.resources+a.connections));this.log(null,'game',`${ranked[0].name} wins after twenty years. Tiebreak score uses all five guild lanes.`);this.render();}
+  endGame(){
+    this.state.phase='gameOver';
+    this.state.activeGuildId=null;
+    const goals=this.victoryGoals();
+    const ranked=[...this.victoryContenders()].sort((a,b)=>this.victoryProgressScore(b,goals)-this.victoryProgressScore(a,goals));
+    const top=ranked[0];
+    this.log(null,'game',`The twenty-year campaign ends with no victory-lane winner. ${top?.name||'No guild'} led final scoring across all five lanes.`);
+    this.render();
+  }
 
   log(guild,type,summary){this.state.log.unshift({year:this.state.year,season:this.currentSeason(),guildId:guild?.id||null,type,summary});this.state.log.length=Math.min(this.state.log.length,80);}
   recordAiActivity(guild,type,summary,detail=''){
@@ -2914,7 +3432,16 @@ export class Game {
     const identity=this.guildIdentity(guild);
     const roster=guild.roster.map(c=>this.guildRosterRow(c,guild)).join('')||'<p class="empty">No hired mercenaries.</p>';
     const profile=guild.personality?.label?`<span>${this.escapeHtml(guild.personality.label)} AI</span>`:'';
-    return `<article class="game-card guild-inspection"><div class="guild-inspection-summary"><span><strong>${guild.gold}</strong>Gold</span><span><strong>${guild.reputation}</strong>Rep</span><span><strong>${guild.completed}</strong>Done</span><span><strong>${guild.resources}</strong>Resources</span><span><strong>${guild.connections}</strong>Connections</span></div><p class="victory-progress">${this.escapeHtml(this.victoryProgressText(guild))}</p><div class="guild-inspection-meta"><span>${this.escapeHtml(identity.label)}</span>${profile}<span>${this.activeWorkers(guild).length}/${guild.roster.length} active</span></div><div class="guild-roster-list">${roster}</div></article>`;
+    return `<article class="game-card guild-inspection"><div class="guild-inspection-summary"><span><strong>${guild.gold}</strong>Gold</span><span><strong>${guild.reputation}</strong>Rep</span><span><strong>${guild.completed}</strong>Done</span><span><strong>${guild.resources}</strong>Resources</span><span><strong>${guild.connections}</strong>Connections</span></div><p class="victory-progress">${this.escapeHtml(this.victoryProgressText(guild))}</p><div class="guild-inspection-meta"><span>${this.escapeHtml(identity.label)}</span>${profile}<span>${this.activeWorkers(guild).length}/${guild.roster.length} active</span></div>${this.guildFactionChipsHtml(guild)}<div class="guild-roster-list">${roster}</div></article>`;
+  }
+  guildFactionChipsHtml(guild){
+    const thresholds=this.patronFavorThresholds();
+    const nextTier=favor=>favor>=thresholds.ally?'Ally':favor>=thresholds.slot?`Ally ${thresholds.ally}`:favor>=thresholds.training?`Slot ${thresholds.slot}`:favor>=thresholds.ready?`Training ${thresholds.training}`:`Ready ${thresholds.ready}`;
+    const chips=(this.data.contractParts.patrons||[]).map(patron=>{
+      const favor=this.patronFavor(guild,patron.key);
+      return `<button class="guild-faction-chip ${favor>=thresholds.ready?'active':''}" type="button" data-glossary-term="${this.escapeAttr(patron.key)}"><strong>${this.escapeHtml(patron.path)}</strong><span>${favor} / ${this.escapeHtml(nextTier(favor))}</span></button>`;
+    }).join('');
+    return `<section class="guild-factions"><h4>Factions</h4><div class="guild-faction-grid">${chips}</div></section>`;
   }
   guildRosterRow(c,guild){
     const s=this.getStatus(c.status);
@@ -2938,12 +3465,12 @@ export class Game {
     if(placement.type==='recovery')return 'Recovering';
     return 'Placed';
   }
-  characterCard(c,{showHistory=false,showAllTraits=false,guild=null}={}){
+  characterCard(c,{showHistory=false,showAllTraits=false,guild=null,allowDismissal=true}={}){
     const s=this.getStatus(c.status);
     const owner=guild?`<p class="archetype">${this.escapeHtml(guild.name)}</p>`:'';
     const status=guild?this.workerPlacementText(c,guild):c.alive?(this.isPlaced(c)?'Placed':'Available'):'Dead';
     const conditions=(c.conditions||[]).map(condition=>this.conditionHtml(condition)).join('');
-    return `<article class="game-card character-card"><div class="card-header"><div><h3>${c.name}</h3><p class="archetype">${this.termLink(c.archetype)}</p>${owner}</div><button class="status-badge glossary-term" type="button" data-glossary-term="${this.escapeAttr(s.name)}">${this.escapeHtml(s.name)}</button></div><div class="traits">${this.renderTraitChips(c,showAllTraits)}</div>${conditions?`<div class="conditions">${conditions}</div>`:''}<dl class="stats"><dt>Recruit cost</dt><dd>${this.baseRecruitCost(c)}</dd><dt>Annual salary</dt><dd>${this.characterSalary(c)}</dd><dt>Reputation required</dt><dd>${this.reputationRequirement(c)}</dd><dt>Resources</dt><dd>${c.resources}</dd><dt>Connections</dt><dd>${c.connections}</dd><dt>Status</dt><dd>${this.escapeHtml(status)}</dd></dl>${this.dismissalHtml(c,guild)}${this.characterEngineHtml(c,showAllTraits)}${showHistory?`<p class="history">${c.history.slice(-3).join(' ')||'No history yet.'}</p>`:''}</article>`;
+    return `<article class="game-card character-card"><div class="card-header"><div><h3>${c.name}</h3><p class="archetype">${this.termLink(c.archetype)}</p>${owner}</div><button class="status-badge glossary-term" type="button" data-glossary-term="${this.escapeAttr(s.name)}">${this.escapeHtml(s.name)}</button></div><div class="traits">${this.renderTraitChips(c,showAllTraits)}</div>${conditions?`<div class="conditions">${conditions}</div>`:''}<dl class="stats"><dt>Recruit cost</dt><dd>${this.baseRecruitCost(c)}</dd><dt>Annual salary</dt><dd>${this.characterSalary(c)}</dd><dt>Reputation required</dt><dd>${this.reputationRequirement(c)}</dd><dt>Resources</dt><dd>${c.resources}</dd><dt>Connections</dt><dd>${c.connections}</dd><dt>Status</dt><dd>${this.escapeHtml(status)}</dd></dl>${allowDismissal?this.dismissalHtml(c,guild):''}${this.characterEngineHtml(c,showAllTraits)}${showHistory?`<p class="history">${c.history.slice(-3).join(' ')||'No history yet.'}</p>`:''}</article>`;
   }
   dismissalHtml(c,guild){
     if(!this.isLocalGuild(guild)||!c.alive)return '';
@@ -3157,6 +3684,7 @@ export class Game {
     this.ui.contractGrid.querySelectorAll('[data-focus-contract]').forEach(btn=>btn.addEventListener('click',evt=>{
       evt.stopPropagation();
       this.state.focusContractId=this.state.focusContractId===btn.dataset.focusContract?null:btn.dataset.focusContract;
+      if(this.state.focusContractId)this.state.focusFacilityKey=null;
       this.render();
     }));
     this.ui.contractGrid.querySelectorAll('[data-open-contract]').forEach(btn=>btn.addEventListener('click',evt=>{
@@ -3170,16 +3698,19 @@ export class Game {
     const preview=chance===null?'No team':`${chance}%`;
     const readiness=this.contractReadinessCompactHtml(human,c);
     const focused=this.state.focusContractId===c.instanceId;
-    return `<article class="contract-tile ${focused?'focused-contract':''}" style="${this.contractAccentStyle(c)}"><div class="contract-top"><button class="contract-title-btn" type="button" data-open-contract="${c.instanceId}">${this.escapeHtml(c.title)}</button><button class="risk-badge glossary-term" type="button" data-glossary-term="${this.escapeAttr(c.risk)}">${this.escapeHtml(c.risk)}</button></div><div class="contract-subline"><span>${this.escapeHtml(c.type)}</span><span>${this.escapeHtml(this.contractWorkLabel(c,human))}</span><span>${c.reward.gold}g/${c.reward.reputation}r</span></div>${this.contractClaimStripHtml(c)}${readiness}${this.contractSlotTrayHtml(c,human)}<div class="contract-actions"><button class="focus-contract-btn ${focused?'active':''}" type="button" data-focus-contract="${c.instanceId}">${focused?'Focused':'Focus'}</button><button class="contract-detail-action" type="button" data-open-contract="${c.instanceId}">Info</button><span class="contract-preview">${this.escapeHtml(preview)}</span></div></article>`;
+    const patron=c.patron?`<button class="contract-patron-chip" type="button" data-glossary-term="${this.escapeAttr(c.patron.key)}">${this.escapeHtml(c.patron.name)}</button>`:'';
+    return `<article class="contract-tile ${focused?'focused-contract':''}" style="${this.contractAccentStyle(c)}"><div class="contract-top"><button class="contract-title-btn" type="button" data-open-contract="${c.instanceId}">${this.escapeHtml(c.title)}</button><button class="risk-badge glossary-term" type="button" data-glossary-term="${this.escapeAttr(c.risk)}">${this.escapeHtml(c.risk)}</button></div><div class="contract-subline"><span>${this.escapeHtml(c.type)}</span><span>${this.escapeHtml(this.contractWorkLabel(c,human))}</span><span>${c.reward.gold}g/${c.reward.reputation}r</span>${patron}</div>${this.contractClaimStripHtml(c)}${readiness}${this.contractSlotTrayHtml(c,human)}<div class="contract-actions"><button class="focus-contract-btn ${focused?'active':''}" type="button" data-focus-contract="${c.instanceId}">${focused?'Focused':'Focus'}</button><button class="contract-detail-action" type="button" data-open-contract="${c.instanceId}">Info</button><span class="contract-preview">${this.escapeHtml(preview)}</span></div></article>`;
   }
   contractClaimStripHtml(contract){
     const claimant=this.contractClaimant(contract);
     if(!claimant)return '';
     const competitors=this.state.guilds.filter(g=>g.id!==claimant.id&&this.placedTeam(g,contract).length&&this.contractPosture(contract,g)==='compete');
-    const cooperators=this.state.guilds.filter(g=>g.id!==claimant.id&&this.placedTeam(g,contract).length&&this.contractPosture(contract,g)!=='compete');
+    const rejected=this.state.guilds.filter(g=>g.id!==claimant.id&&this.placedTeam(g,contract).length&&this.contractPosture(contract,g)==='rejected');
+    const cooperators=this.state.guilds.filter(g=>g.id!==claimant.id&&this.placedTeam(g,contract).length&&this.contractPosture(contract,g)==='cooperate');
     const parts=[`Claim: ${claimant.name}`];
     if(cooperators.length)parts.push(`Coop: ${cooperators.map(g=>g.name).join(', ')}`);
     if(competitors.length)parts.push(`Contest: ${competitors.map(g=>g.name).join(', ')}`);
+    if(rejected.length)parts.push(`Rejected: ${rejected.map(g=>g.name).join(', ')}`);
     return `<div class="contract-claim-strip">${parts.map(part=>`<span>${this.escapeHtml(part)}</span>`).join('')}</div>`;
   }
   contractInspectionHtml(contract,guild){
@@ -3191,7 +3722,8 @@ export class Game {
     const cooperativeOdds=this.cooperativeOddsBreakdown(contract);
     const odds=cooperativeOdds?this.escapeHtml(cooperativeOdds).replace(/\n/g,'<br>'):placed.length?this.escapeHtml(this.contractOddsBreakdown(guild,contract,placed)).replace(/\n/g,'<br>'):'Assign mercs to preview success odds.';
     const rivals=this.rivalContractRosterHtml(contract);
-    return `<article class="game-card contract-inspection"><p class="contract-detail-note">${this.escapeHtml(this.contractDescriptionText(contract))}</p><div class="contract-detail-grid"><span><strong>Odds</strong>${chance===null?'No team':`${chance}%`}</span><span><strong>Work</strong>${this.escapeHtml(this.contractWorkLabel(contract,guild))}</span><span><strong>Reward</strong>${contract.reward.gold}g / ${contract.reward.reputation}r</span><span><strong>Resources</strong>${contract.materials||0}</span><span><strong>Offer</strong>${this.escapeHtml(this.contractOfferLabel(contract))}</span></div><section class="contract-detail-tags"><h4>Needs</h4><p>${needs}</p><h4>Helps</h4><p>${helps}</p><h4>Readiness</h4>${readiness}</section><section class="engine-rules"><h4>Odds Preview</h4><p>${odds}</p></section>${rivals?`<section class="contract-detail-rivals"><h4>Rivals</h4>${rivals}</section>`:''}</article>`;
+    const patron=contract.patron?`<button class="contract-patron-chip detail" type="button" data-glossary-term="${this.escapeAttr(contract.patron.key)}">${this.escapeHtml(contract.patron.name)}</button>`:'None';
+    return `<article class="game-card contract-inspection"><p class="contract-detail-note">${this.escapeHtml(this.contractDescriptionText(contract))}</p><div class="contract-detail-grid"><span><strong>Odds</strong>${chance===null?'No team':`${chance}%`}</span><span><strong>Work</strong>${this.escapeHtml(this.contractWorkLabel(contract,guild))}</span><span><strong>Reward</strong>${contract.reward.gold}g / ${contract.reward.reputation}r</span><span><strong>Resources</strong>${contract.materials||0}</span><span><strong>Offer</strong>${this.escapeHtml(this.contractOfferLabel(contract))}</span><span><strong>Patron</strong>${patron}</span></div><section class="contract-detail-tags"><h4>Needs</h4><p>${needs}</p><h4>Helps</h4><p>${helps}</p><h4>Readiness</h4>${readiness}</section><section class="engine-rules"><h4>Odds Preview</h4><p>${odds}</p></section>${rivals?`<section class="contract-detail-rivals"><h4>Rivals</h4>${rivals}</section>`:''}</article>`;
   }
   contractHeaderParts(contract){
     const patron=contract.patron?.name||'';
@@ -3220,7 +3752,7 @@ export class Game {
     const readiness=this.contractReadiness(guild,contract);
     const parts=[];
     if(readiness.scouted)parts.push(`Scouted +${readiness.scouted*5}%`);
-    if(readiness.planned)parts.push('Planned +10%');
+    if(readiness.planned&&this.contractPlanningApplies(guild,contract))parts.push('Planned +10%');
     return parts.join(', ');
   }
   contractReadinessHtml(guild,contract){
@@ -3233,7 +3765,7 @@ export class Game {
   }
   contractSlotTrayHtml(contract,guild){
     const occupants=this.contractSlotOccupants(contract,guild).slice(0,this.contractSharedSlotLimit());
-    const canDrop=contract.offerSeasons>0&&!contract.sharedProgress&&!this.contractProgress(guild,contract);
+    const canDrop=this.contractAllowsNewPlacement(contract,guild);
     const slots=occupants.map(occupant=>this.contractOccupiedSlot(contract,occupant,guild));
     while(slots.length<this.contractSharedSlotLimit())slots.push(this.contractEmptySlot(contract,canDrop));
     return `<div class="contract-slot-tray">${slots.join('')}</div>`;
@@ -3242,7 +3774,7 @@ export class Game {
     const local=guild?.id===viewer?.id;
     const locked=!local||this.contractProgress(guild,contract);
     const posture=this.contractPosture(contract,guild);
-    const challenge=!local&&contract.offerSeasons>0&&!contract.sharedProgress&&!this.contractProgress(viewer,contract)&&!this.contractProgress(guild,contract);
+    const challenge=!local&&this.contractAllowsNewPlacement(contract,viewer)&&!this.contractProgress(guild,contract);
     return `<div class="worker-slot contract-slot ${local?'local-slot':'rival-slot'} ${posture==='compete'?'compete-slot':posture==='cooperate'?'cooperate-slot':''} ${locked?'locked':''}" ${local&&!locked?`data-drop-type="contract" data-target="${contract.instanceId}" data-mode="cooperate"`:challenge?`data-drop-type="contract" data-target="${contract.instanceId}" data-mode="compete"`:''}>${this.slotWorkerHtml(worker,this.workerInitials(worker),locked)}</div>`;
   }
   contractEmptySlot(contract,droppable){
@@ -3283,10 +3815,20 @@ export class Game {
   recoverySlot(worker){
     return `<div class="worker-slot recovery-slot" data-drop-type="recovery">${worker?this.slotWorkerHtml(worker,this.workerInitials(worker),false):''}</div>`;
   }
-  renderFacilities(){const human=this.activeLocalGuild();this.ui.facilityGrid.innerHTML=this.data.contractParts.facilities.map(f=>this.facilityTile(f,human)).join('');this.bindDropSlots();}
+  renderFacilities(){const human=this.activeLocalGuild();this.ui.facilityGrid.innerHTML=this.data.contractParts.facilities.map(f=>this.facilityTile(f,human)).join('');this.bindFacilityButtons();this.bindDropSlots();}
+  bindFacilityButtons(){
+    this.ui.facilityGrid.querySelectorAll('[data-focus-facility]').forEach(btn=>btn.addEventListener('click',evt=>{
+      evt.stopPropagation();
+      this.state.focusFacilityKey=this.state.focusFacilityKey===btn.dataset.focusFacility?null:btn.dataset.focusFacility;
+      if(this.state.focusFacilityKey)this.state.focusContractId=null;
+      this.render();
+    }));
+  }
   facilityTile(f,guild){
     const workers=this.facilityWorkers(guild,f.key,'work');
-    return `<article class="facility-tile"><div class="facility-top"><button class="facility-title-btn" type="button" data-glossary-term="${this.escapeAttr(f.key)}">${this.escapeHtml(f.label)}</button><span class="facility-ready-count">${this.facilityReadyLabel(guild,f)}</span></div><div class="slot-row facility-slot-tray">${Array.from({length:f.slots},(_,i)=>this.facilitySlot(f,workers[i])).join('')}</div></article>`;
+    const evolved=this.facilityEvolutionPatron(guild,f);
+    const focused=this.state.focusFacilityKey===f.key;
+    return `<article class="facility-tile ${focused?'focused-facility':''}"><div class="facility-top"><button class="facility-title-btn" type="button" data-glossary-term="${this.escapeAttr(evolved?.key||f.key)}">${this.escapeHtml(this.facilityDisplayLabel(guild,f))}</button><div class="facility-actions"><span class="facility-ready-count">${this.facilityReadyLabel(guild,f)}</span><button class="focus-contract-btn ${focused?'active':''}" type="button" data-focus-facility="${this.escapeAttr(f.key)}">${focused?'Focused':'Focus'}</button></div></div><div class="slot-row facility-slot-tray">${Array.from({length:this.facilitySlotCount(guild,f)},(_,i)=>this.facilitySlot(f,workers[i])).join('')}</div></article>`;
   }
   facilitySlot(f,worker){return `<div class="worker-slot facility-slot" data-drop-type="facility" data-target="${f.key}">${worker?this.slotWorkerHtml(worker,this.workerInitials(worker),false):''}</div>`;}
   slotWorkerHtml(worker,label,locked=false){
@@ -3299,10 +3841,13 @@ export class Game {
   bindDropSlots(){this.bindDragSources();this.bindReturnDrop(this.ui.peopleGrid);document.querySelectorAll('.worker-slot[data-drop-type]').forEach(slot=>{slot.addEventListener('dragover',evt=>{evt.preventDefault();slot.classList.add('over');});slot.addEventListener('dragleave',()=>slot.classList.remove('over'));slot.addEventListener('drop',evt=>{evt.preventDefault();slot.classList.remove('over');const id=evt.dataTransfer.getData('text/plain');this.placeWorker(id,slot.dataset.target,slot.dataset.dropType,slot.dataset.mode||'work');});});}
   facilityReadyHtml(guild,facility){
     const ready=this.facilityReadyCount(guild,facility.key);
-    return `<div class="facility-ready-row">${ready?Array.from({length:ready},()=>`<span class="facility-ready-mark">Ready</span>`).join(''):'<span class="facility-ready-empty">Not ready</span>'}</div>`;
+    const planned=this.facilityPlanningApplies(guild,facility)?this.facilityTrainingPlanCount(guild,facility.key):0;
+    const marks=[...Array.from({length:ready},()=>`<span class="facility-ready-mark">Ready</span>`),...Array.from({length:planned},()=>`<span class="facility-ready-mark">Planned</span>`)];
+    return `<div class="facility-ready-row">${marks.length?marks.join(''):'<span class="facility-ready-empty">Not ready</span>'}</div>`;
   }
   facilityReadyLabel(guild,facility){
     const ready=this.facilityReadyCount(guild,facility.key);
-    return ready?`Ready ${ready}`:'Not ready';
+    const planned=this.facilityPlanningApplies(guild,facility)?this.facilityTrainingPlanCount(guild,facility.key):0;
+    return `${ready}/3 Worked${planned?' + Planned':''}`;
   }
 }

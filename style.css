@@ -165,12 +165,16 @@ h1 { margin-bottom: .2rem; font-size: 1.55rem; }
 .contract-tile::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: linear-gradient(135deg, rgba(var(--pool-a, 197, 154, 84), .08), transparent 34%, transparent 66%, rgba(var(--pool-b, 197, 154, 84), .07)); pointer-events: none; }
 .contract-tile.focused-contract { border-color: var(--accent-2); box-shadow: inset 0 0 0 1px rgba(228,196,132,.34), 0 0 18px rgba(197,154,84,.14); }
 .facility-tile { display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: .42rem .5rem; box-shadow: inset 0 1px 0 rgba(255,255,255,.025); overflow: hidden; }
+.facility-tile.focused-facility { border-color: var(--accent-2); box-shadow: inset 0 0 0 1px rgba(228,196,132,.34), 0 0 18px rgba(197,154,84,.14); }
 .contract-top { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: .4rem; min-width: 0; }
 .contract-title-btn { min-width: 0; min-height: 0; padding: 0; border: 0; background: transparent; color: var(--text); font-size: .82rem; font-weight: 900; line-height: 1.12; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .contract-title-btn:hover, .contract-title-btn:focus-visible { color: var(--accent-2); outline: none; }
-.contract-subline { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: .32rem; align-items: center; color: var(--muted); font-size: .64rem; line-height: 1.05; margin-top: .16rem; min-width: 0; }
+.contract-subline { display: grid; grid-template-columns: minmax(0, 1fr) auto auto minmax(0, .9fr); gap: .28rem; align-items: center; color: var(--muted); font-size: .64rem; line-height: 1.05; margin-top: .16rem; min-width: 0; }
 .contract-subline span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.contract-subline span:last-child { color: var(--accent-2); font-weight: 800; }
+.contract-subline span:nth-child(3) { color: var(--accent-2); font-weight: 800; }
+.contract-patron-chip { min-width: 0; border: 1px solid rgba(228,196,132,.24); border-radius: 999px; padding: .08rem .28rem; color: var(--accent-2); background: rgba(197,154,84,.07); font-size: .58rem; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.contract-patron-chip:hover, .contract-patron-chip:focus-visible { border-color: rgba(228,196,132,.48); outline: none; }
+.contract-patron-chip.detail { max-width: 100%; font-size: .7rem; padding: .16rem .38rem; }
 .contract-claim-strip { display: flex; flex-wrap: nowrap; gap: .18rem; min-height: .94rem; margin-top: .2rem; overflow: hidden; }
 .contract-claim-strip span { max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid rgba(255,255,255,.08); border-radius: 999px; padding: .08rem .34rem; color: var(--muted); background: rgba(255,255,255,.025); font-size: .58rem; line-height: 1; }
 .contract-claim-strip span:first-child { color: var(--accent-2); border-color: rgba(228,196,132,.32); background: rgba(197,154,84,.08); }
@@ -182,16 +186,15 @@ h1 { margin-bottom: .2rem; font-size: 1.55rem; }
 .contract-tile h3 { font-size: .92rem; margin-bottom: .12rem; line-height: 1.16; }
 .contract-meta { flex: 0 0 auto; display: grid; gap: .22rem; justify-items: end; align-content: start; max-width: 118px; }
 .risk-badge, .contract-meta .risk-badge, .contract-meta .contract-chip { max-width: 100%; text-align: center; white-space: nowrap; font-size: .64rem; line-height: 1; padding: .16rem .38rem; background: rgba(255,255,255,.025); border: 1px solid rgba(197,154,84,.38); border-radius: 999px; color: var(--accent-2); }
-.facility-top { display: flex; align-items: center; justify-content: space-between; gap: .35rem; min-width: 0; }
+.facility-top { position: relative; z-index: 2; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: .35rem; min-width: 0; }
 .facility-top span { color: var(--accent-2); font-size: .72rem; font-weight: 800; }
 .facility-title-btn { min-width: 0; min-height: 0; padding: 0; border: 0; background: transparent; color: var(--text); font-size: .78rem; font-weight: 900; line-height: 1.05; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .facility-title-btn:hover, .facility-title-btn:focus-visible { color: var(--accent-2); outline: none; }
-.facility-ready-count { flex: 0 0 auto; border: 1px solid rgba(228,196,132,.28); border-radius: 999px; padding: .08rem .34rem; background: rgba(197,154,84,.08); font-size: .62rem !important; line-height: 1; color: var(--accent-2); }
+.facility-ready-count { flex: 0 0 auto; border: 1px solid rgba(228,196,132,.28); border-radius: 999px; padding: .08rem .34rem; background: rgba(197,154,84,.08); font-size: .62rem !important; line-height: 1; color: var(--accent-2); white-space: nowrap; }
 .facility-tile h3 { font-size: .78rem; line-height: 1.05; min-height: .85rem; margin-bottom: .08rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .contract-tile p, .facility-tile p { font-size: .76rem; color: var(--muted); margin-bottom: .36rem; line-height: 1.18; }
 .contract-tile .description { display: block; }
 .facility-tile p { margin-bottom: .24rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.facility-note { min-height: .78rem; color: var(--muted); font-size: .62rem; line-height: 1.05; margin: .02rem 0 .12rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .facility-ready-row { display: flex; flex-wrap: nowrap; gap: .18rem; align-items: center; min-height: .92rem; margin: 0 0 .16rem; overflow: hidden; }
 .facility-ready-mark, .facility-ready-empty { border: 1px solid rgba(228,196,132,.32); border-radius: 999px; padding: .06rem .3rem; font-size: .58rem; line-height: 1; white-space: nowrap; }
 .facility-ready-mark { color: var(--accent-2); background: rgba(197,154,84,.1); }
@@ -215,6 +218,7 @@ h1 { margin-bottom: .2rem; font-size: 1.55rem; }
 .contract-slot.compete-slot { border-color: rgba(212,101,91,.58); background: rgba(212,101,91,.12); }
 .facility-tile .slot-row { grid-template-columns: repeat(2, var(--merc-token-width)); gap: .3rem; align-self: end; justify-content: start; }
 .facility-slot-tray { margin-top: .34rem; }
+.facility-actions { position: relative; z-index: 3; display: flex; justify-content: end; align-items: center; gap: .22rem; min-width: 0; overflow: visible; }
 .worker-slot { min-height: 32px; border: 1px dashed var(--border); border-radius: 7px; display: flex; align-items: center; justify-content: center; padding: .18rem .22rem; color: var(--muted); font-size: .7rem; text-align: center; background: rgba(255,255,255,.025); }
 .worker-slot.over { border-color: var(--accent); background: rgba(197,154,84,.12); }
 .worker-slot.locked { border-style: solid; border-color: rgba(197,154,84,.5); }
@@ -270,6 +274,14 @@ h1 { margin-bottom: .2rem; font-size: 1.55rem; }
 .trait-choice.keep { color: var(--muted); }
 .trait-choice.danger-choice { border-color: rgba(213,107,107,.35); color: #f0b0b0; }
 .trait-choice.danger-choice:hover, .trait-choice.danger-choice:focus-visible { border-color: var(--danger); }
+.response-collaborators { margin-top: .85rem; }
+.response-collaborators h4 { margin: 0 0 .45rem; color: var(--accent); text-transform: uppercase; font-size: .72rem; letter-spacing: .03em; }
+.response-merc-list { display: grid; gap: .45rem; }
+.response-merc-link { border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text); padding: .55rem .65rem; text-align: left; cursor: pointer; }
+.response-merc-link strong, .response-merc-link span { display: block; }
+.response-merc-link span { color: var(--muted); font-size: .78rem; margin-top: .18rem; }
+.response-merc-link:hover, .response-merc-link:focus-visible { border-color: var(--accent); outline: none; }
+.response-back { display: block; width: 100%; text-align: center; box-sizing: border-box; margin-bottom: .65rem; }
 .conditions { display: flex; flex-wrap: wrap; gap: .35rem; margin: -.25rem 0 .65rem; }
 .condition { border-radius: 999px; background: rgba(213,107,107,.13); color: #f0b0b0; border: 1px solid rgba(213,107,107,.35); padding: .18rem .45rem; font-size: .76rem; }
 .glossary-term { border: 0; background: transparent; color: inherit; font: inherit; padding: 0; min-height: 0; cursor: pointer; text-align: inherit; }
@@ -297,6 +309,15 @@ h1 { margin-bottom: .2rem; font-size: 1.55rem; }
 .victory-progress { color: var(--accent-2); font-size: .78rem; line-height: 1.25; margin: .55rem 0 0; }
 .guild-inspection-meta { display: flex; flex-wrap: wrap; gap: .4rem; margin: .65rem 0 .75rem; color: var(--accent-2); font-size: .78rem; }
 .guild-inspection-meta span { border: 1px solid rgba(197,154,84,.26); border-radius: 999px; padding: .14rem .45rem; background: rgba(197,154,84,.08); }
+.guild-factions { margin: .2rem 0 .75rem; }
+.guild-factions h4 { margin: 0 0 .4rem; color: var(--accent); text-transform: uppercase; font-size: .72rem; letter-spacing: .03em; }
+.guild-faction-grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: .3rem; }
+.guild-faction-chip { min-width: 0; border: 1px solid rgba(255,255,255,.07); border-radius: 8px; background: rgba(255,255,255,.025); color: var(--muted); padding: .34rem .42rem; text-align: left; }
+.guild-faction-chip strong, .guild-faction-chip span { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.guild-faction-chip strong { color: var(--text); font-size: .76rem; line-height: 1.05; }
+.guild-faction-chip span { margin-top: .12rem; font-size: .68rem; color: var(--muted); }
+.guild-faction-chip.active { border-color: rgba(228,196,132,.34); background: rgba(197,154,84,.08); }
+.guild-faction-chip.active span { color: var(--accent-2); }
 .guild-roster-list { display: grid; gap: .45rem; }
 .guild-roster-row { display: grid; grid-template-columns: minmax(0,1fr) minmax(120px, 32%); gap: .65rem; align-items: start; border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,.025); padding: .55rem .6rem; cursor: pointer; }
 .guild-roster-row:hover, .guild-roster-row:focus-visible { border-color: var(--accent); background: #293039; outline: none; }

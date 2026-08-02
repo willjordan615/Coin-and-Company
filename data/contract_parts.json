@@ -3,6 +3,7 @@
     "boardSize": 3,
     "contractsPerExtraPlayer": 0,
     "contractSharedSlots": 5,
+    "cooperativeClaimantDuelShare": 0.7,
     "keepVisibleFraction": 0.4,
     "beginnerBoardYears": 1,
     "beginnerMinChance": 50,
@@ -19,17 +20,23 @@
     "guildResourceCap": 8,
     "guildConnectionCap": 5,
     "victoryGoals": {
-      "gold": 2000,
-      "reputation": 500,
-      "completed": 60,
-      "resources": 50,
-      "connections": 50
+      "gold": 1500,
+      "reputation": 400,
+      "completed": 80,
+      "resources": 75,
+      "connections": 75
     },
     "minRewardGold": 6,
     "minRewardReputation": 1,
     "rewardGoldScale": 0.75,
     "requirementWeights": [30, 30, 30],
     "supportWeights": [15, 15, 15, 15],
+    "patronFavorThresholds": {
+      "ready": 2,
+      "training": 4,
+      "slot": 6,
+      "ally": 8
+    },
     "materialBonusByTwist": {
       "grand": 1
     },
@@ -91,22 +98,22 @@
     {"key":"Dead","kind":"terminal","duration":null,"penalty":0,"recoveryPerRest":0,"description":"Gone from active work, kept in guild history."}
   ],
   "patrons": [
-    {"key":"abbey","name":"the Abbey","trait":"Faithful","difficulty":2,"gold":2,"rep":1},
-    {"key":"duke","name":"the Ducal Court","trait":"Noble","difficulty":6,"gold":8,"rep":2},
-    {"key":"market","name":"the Market League","trait":"Shrewd","difficulty":3,"gold":7,"rep":0},
-    {"key":"watch","name":"the Town Watch","trait":"Watchful","difficulty":4,"gold":4,"rep":1},
-    {"key":"farmers","name":"the Free Farmers","trait":"Rural","difficulty":0,"gold":1,"rep":1},
-    {"key":"university","name":"the University","trait":"Scholar","difficulty":5,"gold":5,"rep":2},
-    {"key":"caravan","name":"a Foreign Caravan","trait":"Connected","difficulty":7,"gold":10,"rep":1},
-    {"key":"frontier","name":"the Frontier Villages","trait":"Hardy","difficulty":4,"gold":3,"rep":2},
-    {"key":"shipwrights","name":"the River Shipwrights","trait":"Craftsman","difficulty":3,"gold":6,"rep":1},
-    {"key":"masons","name":"the Stonecutters' Hall","trait":"Stoneworker","difficulty":4,"gold":5,"rep":1},
-    {"key":"miners","name":"the Deep Mine Compact","trait":"Strong","difficulty":5,"gold":7,"rep":1},
-    {"key":"pilgrims","name":"a Pilgrim Host","trait":"Patient","difficulty":1,"gold":1,"rep":3},
-    {"key":"magistrates","name":"the Magistrates' Bench","trait":"Careful","difficulty":6,"gold":5,"rep":3},
-    {"key":"borderlords","name":"the Border Lords","trait":"Veteran","difficulty":9,"gold":12,"rep":2},
-    {"key":"orphans","name":"the Orphans' Trust","trait":"Compassionate","difficulty":0,"gold":0,"rep":4},
-    {"key":"underworld","name":"a Discreet Underworld Broker","trait":"Criminal","difficulty":8,"gold":14,"rep":-1}
+    {"key":"abbey","name":"the Abbey","trait":"Faithful","facility":"chapel","path":"Sanctuary","lane":"reputation","difficulty":2,"gold":2,"rep":1},
+    {"key":"duke","name":"the Ducal Court","trait":"Noble","facility":"common","path":"Courtly Salon","lane":"reputation","difficulty":6,"gold":8,"rep":2},
+    {"key":"market","name":"the Market League","trait":"Shrewd","facility":"market","path":"Exchange Floor","lane":"gold","difficulty":3,"gold":7,"rep":0},
+    {"key":"watch","name":"the Town Watch","trait":"Watchful","facility":"training","path":"Militia Drill","lane":"completed","difficulty":4,"gold":4,"rep":1},
+    {"key":"farmers","name":"the Free Farmers","trait":"Rural","facility":"scout","path":"Field Routes","lane":"resources","difficulty":0,"gold":1,"rep":1},
+    {"key":"university","name":"the University","trait":"Scholar","facility":"archives","path":"Research Chair","lane":"connections","difficulty":5,"gold":5,"rep":2},
+    {"key":"caravan","name":"a Foreign Caravan","trait":"Connected","facility":"market","path":"Caravan Office","lane":"connections","difficulty":7,"gold":10,"rep":1},
+    {"key":"frontier","name":"the Frontier Villages","trait":"Hardy","facility":"scout","path":"Border Scouts","lane":"completed","difficulty":4,"gold":3,"rep":2},
+    {"key":"shipwrights","name":"the River Shipwrights","trait":"Craftsman","facility":"workshop","path":"Riverwright Bay","lane":"resources","difficulty":3,"gold":6,"rep":1},
+    {"key":"masons","name":"the Stonecutters' Hall","trait":"Stoneworker","facility":"workshop","path":"Stone Yard","lane":"completed","difficulty":4,"gold":5,"rep":1},
+    {"key":"miners","name":"the Deep Mine Compact","trait":"Strong","facility":"infirmary","path":"Hard-Labor Ward","lane":"resources","difficulty":5,"gold":7,"rep":1},
+    {"key":"pilgrims","name":"a Pilgrim Host","trait":"Patient","facility":"chapel","path":"Pilgrim House","lane":"completed","difficulty":1,"gold":1,"rep":3},
+    {"key":"magistrates","name":"the Magistrates' Bench","trait":"Careful","facility":"archives","path":"Legal Records","lane":"reputation","difficulty":6,"gold":5,"rep":3},
+    {"key":"borderlords","name":"the Border Lords","trait":"Veteran","facility":"training","path":"Border Camp","lane":"completed","difficulty":9,"gold":12,"rep":2},
+    {"key":"orphans","name":"the Orphans' Trust","trait":"Compassionate","facility":"infirmary","path":"Mercy Ward","lane":"reputation","difficulty":0,"gold":0,"rep":4},
+    {"key":"underworld","name":"a Discreet Underworld Broker","trait":"Criminal","facility":"common","path":"Back Room","lane":"gold","difficulty":8,"gold":14,"rep":-1}
   ],
   "twists": [
     {"key":"routine","label":"","risk":"low","difficulty":-4,"work":0,"offer":1,"gold":-2,"rep":0,"failure":[{"type":"material_loss","weight":45,"amount":1},{"type":"reputation_loss","weight":25,"amount":2},{"type":"negative_trait","weight":30,"trait":"Overworked"}]},
